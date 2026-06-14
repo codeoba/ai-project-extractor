@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Project Extractor</title>
+  <style>
+    body {
+      width: 300px;
+      margin: 0;
+      padding: 16px;
+      background-color: #0f172a;
+      color: #f1f5f9;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      box-sizing: border-box;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border-bottom: 1px solid #334155;
+      padding-bottom: 12px;
+      margin-bottom: 14px;
+    }
+    .logo {
+      font-size: 28px;
+    }
+    .title {
+      font-size: 16px;
+      font-weight: 700;
+      margin: 0;
+      background: linear-gradient(to right, #818cf8, #c084fc);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .content p {
+      font-size: 13px;
+      line-height: 1.5;
+      margin: 0 0 12px 0;
+      color: #cbd5e1;
+    }
+    .sites-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: #94a3b8;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .site-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      padding: 0;
+      margin: 0 0 16px 0;
+      list-style: none;
+    }
+    .site-badge {
+      background-color: #1e293b;
+      border: 1px solid #334155;
+      color: #cbd5e1;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-family: monospace;
+    }
+    .footer {
+      font-size: 11px;
+      color: #475569;
+      text-align: center;
+      border-top: 1px solid #1e293b;
+      padding-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <span class="logo">📁</span>
+    <h3 class="title">AI Project Extractor</h3>
+  </div>
+  <div class="content">
+    <p>This extension extracts project folder structures and code blocks from AI chats and exports them as a single ZIP file.</p>
+    <div class="sites-title">Supported Sites:</div>
+    <ul class="site-list">
+      <li class="site-badge">Gemini</li>
+      <li class="site-badge">Claude</li>
+      <li class="site-badge">DeepSeek</li>
+      <li class="site-badge">ChatGPT</li>
+    </ul>
+    <p style="font-size: 11px; color: #94a3b8;">Open a supported AI chat, look for code outputs, and click the floating 📁 button in the bottom-right corner to extract.</p>
+  </div>
+  <div class="footer">
+    AI Project Extractor v1.0
+  </div>
+</body>
+</html>

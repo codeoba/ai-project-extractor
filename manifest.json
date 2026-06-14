@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "AI Project Extractor",
+  "version": "1.0",
+  "description": "Extracts project structure and files from AI chat models (Gemini, DeepSeek, ChatGPT, Claude) and downloads them as a ZIP.",
+  "permissions": [
+    "downloads",
+    "activeTab"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://gemini.google.com/*",
+        "https://chatgpt.com/*",
+        "https://*.chatgpt.com/*",
+        "https://chat.deepseek.com/*",
+        "https://claude.ai/*"
+      ],
+      "css": ["content.css"],
+      "js": ["libs/jszip.min.js", "content.js"],
+      "run_at": "document_end"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "AI Project Extractor"
+  },
+  "background": {
+    "service_worker": "background.js"
+  }
+}
