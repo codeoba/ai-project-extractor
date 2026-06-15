@@ -1,16 +1,18 @@
-// AI Project Extractor - Content Script
+// AI Project Extractor - Upgraded Content Script
 
 (function () {
   let detectedFiles = [];
   let sidebarEl = null;
   let floatingBtnEl = null;
+  let localDirHandle = null;
+  let originalFiles = {}; // Stores original code text for diffing
 
-  // Initial detection
+  // Initial UI build
   window.addEventListener('load', () => {
     setTimeout(createUI, 2000);
   });
 
-  // Re-run UI creation if DOM shifts or on SPA navigation
+  // Keep floating button alive during SPA navigations
   let lastUrl = location.href;
   new MutationObserver(() => {
     const url = location.href;
@@ -24,23 +26,32 @@
     }
   }).observe(document, { subtree: true, childList: true });
 
-  // -------------------------------------------------------------------
-  // PARSING / EXTRACTION LOGIC
-  // -------------------------------------------------------------------
+  // Load directory handle from IndexedDB if possible on startup
+  async function loadDirectoryFromDB() {
+    try {
+      const db = await openDB();
+      const handle = await getVal(db, 'dirHandle');
+      if (handle) {
+        localDirHandle = handle;
+        updateSyncUI(true);
+      }
+    } catch (e) {
+      console.log("IndexedDB dir handle load failed: ", e);
+    }
+  }
 
+  // Helper: clean emojis/number prefixes
   function cleanFilename(text) {
     if (!text) return '';
     let cleaned = text.trim();
-    cleaned = cleaned.replace(/^[📁📂📄⚙️🔨💻🐍☕️]+/g, ''); // remove emojis
-    cleaned = cleaned.replace(/^\d+[\.\)]\s*/, ''); // remove numeric bullet points like "1. " or "2. "
+    cleaned = cleaned.replace(/^[📁📂📄⚙️🔨💻🐍☕️]+/g, ''); 
+    cleaned = cleaned.replace(/^\d+[\.\)]\s*/, ''); 
     cleaned = cleaned.trim();
     return cleaned;
   }
 
   function getFilenameFromPrecedingSiblings(preElement) {
     const fileRegex = /(?:📁|\d+[\.\)]|\s)*([a-zA-Z0-9_\-\.\/]+\.[a-zA-Z0-9]+)/;
-    
-    // Heuristic 1: Check preceding siblings of the pre element itself
     let sibling = preElement.previousElementSibling;
     let count = 0;
     while (sibling && count < 3) {
@@ -55,7 +66,6 @@
       count++;
     }
 
-    // Heuristic 2: Check preceding siblings of the parent element (in case pre is inside a wrapper div)
     let parent = preElement.parentElement;
     if (parent && parent !== document.body) {
       sibling = parent.previousElementSibling;
@@ -78,7 +88,6 @@
   function getFilenameFromCodeHeader(codeText, langClass) {
     const lines = codeText.split('\n').slice(0, 2);
     const fileRegex = /(?:#|\/\/|\/\*|<!--)\s*([a-zA-Z0-9_\-\.\/]+\.[a-zA-Z0-9]+)/;
-    
     for (let line of lines) {
       const match = line.match(fileRegex);
       if (match) {
@@ -112,18 +121,15 @@
 
   function scanForCodeBlocks() {
     try {
-      console.log("AI Extractor: Starting page scan...");
+      console.log("AI Extractor: Starting scan...");
       detectedFiles = [];
-      
       const preElements = document.querySelectorAll('pre');
-      console.log(`AI Extractor: Found ${preElements.length} <pre> elements on page`);
 
       preElements.forEach((pre, index) => {
         const codeEl = pre.querySelector('code') || pre;
         const codeText = codeEl.innerText || codeEl.textContent || '';
         if (!codeText.trim()) return;
 
-        // Determine language
         let langClass = '';
         if (codeEl.classList) {
           codeEl.classList.forEach(cls => {
@@ -132,15 +138,7 @@
             }
           });
         }
-        if (!langClass && pre.classList) {
-          pre.classList.forEach(cls => {
-            if (cls.startsWith('language-') || cls.startsWith('lang-')) {
-              langClass = cls;
-            }
-          });
-        }
 
-        // Try different heuristics to extract a filename
         let filename = getFilenameFromPrecedingSiblings(pre);
         if (!filename) {
           filename = getFilenameFromCodeHeader(codeText, langClass);
@@ -150,7 +148,6 @@
           filename = `file_${index + 1}.${ext}`;
         }
 
-        // Check if code text starts with the filename
         let cleanedCode = codeText;
         const lines = codeText.split('\n');
         if (lines.length > 0) {
@@ -160,19 +157,126 @@
           }
         }
 
+        const id = `file-${index}`;
         detectedFiles.push({
-          id: `file-${index}-${Date.now()}`,
+          id: id,
           name: filename,
           content: cleanedCode,
           lang: langClass ? langClass.replace(/(?:language-|lang-)/, '') : 'text'
         });
+
+        // Store original code text for diffing purposes
+        originalFiles[id] = cleanedCode;
       });
 
-      console.log(`AI Extractor: Successfully extracted ${detectedFiles.length} files`);
       renderFileList();
+      saveProjectToHistory();
     } catch (err) {
-      console.error("AI Extractor: Scan failed with error:", err);
+      console.error("AI Extractor: Scan failed:", err);
     }
+  }
+
+  // -------------------------------------------------------------------
+  // TEMPLATE BOILERPLATE INJECTOR
+  // -------------------------------------------------------------------
+
+  const TEMPLATES = {
+    wordpress: [
+      { name: "wp-plugin.php", content: "<?php\n/**\n * Plugin Name: Custom AI Plugin\n * Description: Automatically extracted WordPress Plugin.\n * Version: 1.0\n */\n\nif ( ! defined( 'ABSPATH' ) ) {\n\texit; // Exit if accessed directly.\n}\n" },
+      { name: "readme.txt", content: "=== Custom AI Plugin ===\nContributors: AI\nStable tag: 1.0\nLicense: GPLv2\n\n== Description ==\nAn automatically created WordPress plugin." },
+      { name: ".gitignore", content: "# Ignore WordPress uploads & logs\nwp-config.php\nwp-content/uploads/\n*.log\n" }
+    ],
+    nodejs: [
+      { name: "package.json", content: "{\n  \"name\": \"ai-bot-project\",\n  \"version\": \"1.0.0\",\n  \"main\": \"index.js\",\n  \"dependencies\": {\n    \"dotenv\": \"^16.0.0\"\n  }\n}" },
+      { name: "index.js", content: "require('dotenv').config();\nconsole.log('App successfully launched!');\n" },
+      { name: ".env", content: "BOT_TOKEN=YOUR_TOKEN_HERE\nPORT=3000" },
+      { name: ".gitignore", content: "node_modules/\n.env\n" }
+    ],
+    python: [
+      { name: "main.py", content: "import os\n\ndef main():\n    print('Hello from Python Project!')\n\nif __name__ == '__main__':\n    main()\n" },
+      { name: "requirements.txt", content: "requests>=2.28.0\npython-dotenv>=0.21.0\n" },
+      { name: ".gitignore", content: "__pycache__/\n.venv/\nvenv/\n.env\n" }
+    ],
+    extension: [
+      { name: "manifest.json", content: "{\n  \"manifest_version\": 3,\n  \"name\": \"AI Extracted Extension\",\n  \"version\": \"1.0\",\n  \"description\": \"Autogenerated extension\",\n  \"permissions\": [\"activeTab\"],\n  \"background\": {\n    \"service_worker\": \"background.js\"\n  }\n}" },
+      { name: "background.js", content: "chrome.runtime.onInstalled.addListener(() => {\n  console.log('Extension ready.');\n});\n" }
+    ]
+  };
+
+  function injectTemplate(type) {
+    const files = TEMPLATES[type];
+    if (!files) return;
+    files.forEach((file, index) => {
+      const id = `tpl-${type}-${index}-${Date.now()}`;
+      detectedFiles.push({
+        id: id,
+        name: file.name,
+        content: file.content,
+        lang: getExtensionFromLang(file.name)
+      });
+      originalFiles[id] = ""; // Since template file is new, its original text was empty
+    });
+    renderFileList();
+    saveProjectToHistory();
+  }
+
+  // -------------------------------------------------------------------
+  // PERSISTENCE (chrome.storage.local / IndexedDB)
+  // -------------------------------------------------------------------
+
+  function saveProjectToHistory() {
+    const projectNameInput = document.getElementById('project-name-input');
+    const projectName = projectNameInput.value.trim() || 'ai-project';
+    const data = {
+      name: projectName,
+      files: detectedFiles,
+      timestamp: Date.now()
+    };
+
+    chrome.storage.local.get({ history: [] }, (result) => {
+      let history = result.history;
+      // Remove previous entries with matching name to overwrite/update
+      history = history.filter(p => p.name !== projectName);
+      history.unshift(data);
+      // Cap history to last 10 projects
+      if (history.length > 10) history = history.slice(0, 10);
+      chrome.storage.local.set({ history: history }, renderHistoryList);
+    });
+  }
+
+  function renderHistoryList() {
+    chrome.storage.local.get({ history: [] }, (result) => {
+      const historyListEl = document.getElementById('history-list');
+      if (!historyListEl) return;
+      historyListEl.innerHTML = '';
+
+      if (result.history.length === 0) {
+        historyListEl.innerHTML = `<div class="history-empty">No history.</div>`;
+        return;
+      }
+
+      result.history.forEach(proj => {
+        const item = document.createElement('div');
+        item.className = 'history-item';
+        item.innerHTML = `
+          <div class="history-item-info">
+            <span class="history-name">${proj.name}</span>
+            <span class="history-date">${new Date(proj.timestamp).toLocaleTimeString()}</span>
+          </div>
+          <button class="history-load-btn" title="Load project">📂</button>
+        `;
+        item.querySelector('.history-load-btn').addEventListener('click', () => {
+          document.getElementById('project-name-input').value = proj.name;
+          detectedFiles = JSON.parse(JSON.stringify(proj.files)); // clone files
+          // Reset original texts reference for loaded history
+          detectedFiles.forEach(f => {
+            originalFiles[f.id] = f.content;
+          });
+          renderFileList();
+        });
+        historyListEl.appendChild(item);
+      });
+    });
   }
 
   // -------------------------------------------------------------------
@@ -199,32 +303,113 @@
         <h3>AI Project Extractor</h3>
         <button id="sidebar-close-btn">&times;</button>
       </div>
+      
+      <!-- Primary Scan Action -->
       <div class="sidebar-actions">
         <button id="scan-btn" class="primary-btn">🔍 Scan Page</button>
         <button id="export-zip-btn" class="accent-btn" disabled>📦 Export ZIP</button>
       </div>
+
       <div class="project-info">
         <label for="project-name-input">Project Name:</label>
-        <input type="text" id="project-name-input" value="ai-exported-project" placeholder="project-name">
+        <input type="text" id="project-name-input" value="botsales" placeholder="project-name">
       </div>
+
+      <!-- Local Directory Sync Controls -->
+      <div class="sync-section">
+        <div class="section-title">Local Folder Sync</div>
+        <div class="sync-buttons">
+          <button id="link-folder-btn" class="sub-btn">🔗 Link Folder</button>
+          <button id="sync-disk-btn" class="sub-btn" disabled>🔄 Sync Disk</button>
+        </div>
+        <div id="linked-folder-status" class="status-msg">No folder linked.</div>
+      </div>
+
+      <!-- Git & GitHub Upload Controls -->
+      <div class="git-section">
+        <div class="section-title">GitHub Integration</div>
+        <div class="git-buttons">
+          <button id="git-config-btn" class="sub-btn">⚙️ Config Git</button>
+          <button id="git-push-btn" class="sub-btn" disabled>🚀 Push Git</button>
+        </div>
+      </div>
+
+      <!-- Boilerplate Injectors -->
+      <div class="template-section">
+        <div class="section-title">Templates</div>
+        <div class="template-row">
+          <select id="template-select">
+            <option value="wordpress">WordPress Plugin</option>
+            <option value="nodejs">Node.js Bot</option>
+            <option value="python">Python App</option>
+            <option value="extension">Chrome Extension</option>
+          </select>
+          <button id="inject-btn" class="inject-btn">Inject</button>
+        </div>
+      </div>
+
+      <!-- Extracted Project History -->
+      <div class="history-section">
+        <div class="section-title collapsible-header" id="history-toggle">Project History (Click to Expand) ▾</div>
+        <div id="history-list" class="history-content hidden"></div>
+      </div>
+
+      <!-- Detected File Tree View -->
       <div class="file-list-container">
+        <div class="section-title">Extracted Files</div>
         <div id="no-files-msg">No files detected yet. Click "Scan Page" to find project code.</div>
         <ul id="file-list" class="file-tree"></ul>
       </div>
+      
       <div class="sidebar-footer">
-        <span>AI Project Extractor v1.0</span>
+        <span>AI Project Extractor v1.1</span>
       </div>
     `;
     document.body.appendChild(sidebarEl);
+
+    // Setup Git modal element
+    createGitModal();
 
     // Event Listeners
     floatingBtnEl.addEventListener('click', toggleSidebar);
     document.getElementById('sidebar-close-btn').addEventListener('click', toggleSidebar);
     document.getElementById('scan-btn').addEventListener('click', scanForCodeBlocks);
     document.getElementById('export-zip-btn').addEventListener('click', exportAsZip);
+    
+    // Directory Sync listeners
+    document.getElementById('link-folder-btn').addEventListener('click', linkLocalDirectory);
+    document.getElementById('sync-disk-btn').addEventListener('click', syncToLocalDisk);
 
-    // Auto scan on open
+    // Template Injector listener
+    document.getElementById('inject-btn').addEventListener('click', () => {
+      const type = document.getElementById('template-select').value;
+      injectTemplate(type);
+    });
+
+    // Git configuration listener
+    document.getElementById('git-config-btn').addEventListener('click', openGitModal);
+    document.getElementById('git-push-btn').addEventListener('click', pushProjectToGitHub);
+
+    // Project name live save
+    document.getElementById('project-name-input').addEventListener('input', saveProjectToHistory);
+
+    // Collapsible history section
+    document.getElementById('history-toggle').addEventListener('click', () => {
+      const historyList = document.getElementById('history-list');
+      const header = document.getElementById('history-toggle');
+      historyList.classList.toggle('hidden');
+      if (historyList.classList.contains('hidden')) {
+        header.innerText = "Project History (Click to Expand) ▾";
+      } else {
+        header.innerText = "Project History ▴";
+      }
+    });
+
+    // Startup loads
+    loadDirectoryFromDB();
+    renderHistoryList();
     scanForCodeBlocks();
+    checkGitConfig();
   }
 
   function toggleSidebar() {
@@ -235,17 +420,29 @@
     const listEl = document.getElementById('file-list');
     const noFilesEl = document.getElementById('no-files-msg');
     const exportBtn = document.getElementById('export-zip-btn');
+    const syncBtn = document.getElementById('sync-disk-btn');
+    const pushBtn = document.getElementById('git-push-btn');
 
     listEl.innerHTML = '';
 
     if (detectedFiles.length === 0) {
       noFilesEl.style.display = 'block';
       exportBtn.disabled = true;
+      syncBtn.disabled = true;
+      pushBtn.disabled = true;
       return;
     }
 
     noFilesEl.style.display = 'none';
     exportBtn.disabled = false;
+    if (localDirHandle) syncBtn.disabled = false;
+    
+    // Enable push if token is configured
+    chrome.storage.local.get(['github_token', 'github_repo'], (res) => {
+      if (res.github_token && res.github_repo) {
+        pushBtn.disabled = false;
+      }
+    });
 
     detectedFiles.forEach((file, index) => {
       const li = document.createElement('li');
@@ -255,27 +452,26 @@
           <span class="file-icon">📄</span>
           <input type="text" class="file-name-edit" value="${file.name}" data-id="${file.id}">
           <div class="file-item-actions">
-            <button class="preview-btn" title="Preview Content">👁️</button>
+            <button class="preview-btn" title="Edit / Diff Code">👁️</button>
             <button class="delete-btn" title="Delete File">&times;</button>
           </div>
         </div>
       `;
 
-      // Event listener for renaming files
       const nameInput = li.querySelector('.file-name-edit');
       nameInput.addEventListener('change', (e) => {
         file.name = e.target.value.trim();
+        saveProjectToHistory();
       });
 
-      // Preview file click
       li.querySelector('.preview-btn').addEventListener('click', () => {
         showPreviewModal(file);
       });
 
-      // Delete file click
       li.querySelector('.delete-btn').addEventListener('click', () => {
         detectedFiles.splice(index, 1);
         renderFileList();
+        saveProjectToHistory();
       });
 
       listEl.appendChild(li);
@@ -283,8 +479,41 @@
   }
 
   // -------------------------------------------------------------------
-  // PREVIEW MODAL
+  // CODE EDITOR & DIFF VISUALIZER
   // -------------------------------------------------------------------
+
+  // Line-by-line Diff utility
+  function generateDiffHTML(originalText, currentText) {
+    const originalLines = originalText.split('\n');
+    const currentLines = currentText.split('\n');
+    let diffHTML = '';
+
+    const maxLength = Math.max(originalLines.length, currentLines.length);
+
+    for (let i = 0; i < maxLength; i++) {
+      const orig = originalLines[i] !== undefined ? originalLines[i] : null;
+      const curr = currentLines[i] !== undefined ? currentLines[i] : null;
+
+      if (orig === curr) {
+        // Unchanged line
+        diffHTML += `<div class="diff-line unchanged"><span class="line-number">${i+1}</span> <span class="line-content">${escapeHTML(curr)}</span></div>`;
+      } else {
+        // Changed/diff line
+        if (orig !== null) {
+          diffHTML += `<div class="diff-line removed"><span class="line-number">-</span> <span class="line-content">${escapeHTML(orig)}</span></div>`;
+        }
+        if (curr !== null) {
+          diffHTML += `<div class="diff-line added"><span class="line-number">+</span> <span class="line-content">${escapeHTML(curr)}</span></div>`;
+        }
+      }
+    }
+    return diffHTML;
+  }
+
+  function escapeHTML(str) {
+    if (!str) return '';
+    return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
 
   function showPreviewModal(file) {
     let modal = document.getElementById('ai-extractor-preview-modal');
@@ -297,27 +526,384 @@
     modal.innerHTML = `
       <div class="modal-content">
         <div class="modal-header">
-          <h4>Preview: ${file.name}</h4>
+          <div class="modal-title-tabs">
+            <button id="tab-editor" class="tab-btn active">✏️ Editor</button>
+            <button id="tab-diff" class="tab-btn">⚖️ Diff Viewer</button>
+          </div>
           <button class="modal-close">&times;</button>
         </div>
         <div class="modal-body">
-          <textarea readonly class="code-preview-area">${file.content}</textarea>
+          <div id="editor-view" class="tab-panel">
+            <textarea class="code-preview-area" id="editor-textarea">${file.content}</textarea>
+          </div>
+          <div id="diff-view" class="tab-panel hidden">
+            <div class="diff-container" id="diff-container"></div>
+          </div>
         </div>
         <div class="modal-footer">
-          <button class="modal-save-btn primary-btn">Close</button>
+          <button id="modal-save-btn" class="modal-save-btn primary-btn">Save Changes</button>
         </div>
       </div>
     `;
 
     modal.style.display = 'flex';
 
+    const textEditor = modal.querySelector('#editor-textarea');
+
+    // Tab toggles
+    const tabEditor = modal.querySelector('#tab-editor');
+    const tabDiff = modal.querySelector('#tab-diff');
+    const viewEditor = modal.querySelector('#editor-view');
+    const viewDiff = modal.querySelector('#diff-view');
+    const diffContainer = modal.querySelector('#diff-container');
+
+    tabEditor.addEventListener('click', () => {
+      tabEditor.classList.add('active');
+      tabDiff.classList.remove('active');
+      viewEditor.classList.remove('hidden');
+      viewDiff.classList.add('hidden');
+    });
+
+    tabDiff.addEventListener('click', () => {
+      tabEditor.classList.remove('active');
+      tabDiff.classList.add('active');
+      viewEditor.classList.add('hidden');
+      viewDiff.classList.remove('hidden');
+
+      // Refresh and generate Diff
+      const orig = originalFiles[file.id] || "";
+      const curr = textEditor.value;
+      diffContainer.innerHTML = generateDiffHTML(orig, curr);
+    });
+
     const closeFn = () => { modal.style.display = 'none'; };
     modal.querySelector('.modal-close').addEventListener('click', closeFn);
-    modal.querySelector('.modal-save-btn').addEventListener('click', closeFn);
+
+    modal.querySelector('#modal-save-btn').addEventListener('click', () => {
+      file.content = textEditor.value;
+      saveProjectToHistory();
+      closeFn();
+    });
   }
 
   // -------------------------------------------------------------------
-  // EXPORT AS ZIP
+  // DIRECT LOCAL FOLDER SYNC (FILE SYSTEM ACCESS API)
+  // -------------------------------------------------------------------
+
+  async function linkLocalDirectory() {
+    try {
+      const handle = await window.showDirectoryPicker({
+        mode: 'readwrite'
+      });
+      localDirHandle = handle;
+
+      // Save handle to IndexedDB
+      const db = await openDB();
+      await setVal(db, 'dirHandle', handle);
+
+      updateSyncUI(true);
+      document.getElementById('sync-disk-btn').disabled = false;
+    } catch (e) {
+      console.warn("Folder sync linking rejected or failed:", e);
+      document.getElementById('linked-folder-status').innerText = "Linking failed.";
+    }
+  }
+
+  function updateSyncUI(isLinked) {
+    const statusEl = document.getElementById('linked-folder-status');
+    const syncBtn = document.getElementById('sync-disk-btn');
+    if (isLinked && localDirHandle) {
+      statusEl.innerText = `Linked: ${localDirHandle.name} ✓`;
+      statusEl.style.color = '#10b981';
+      syncBtn.disabled = false;
+    } else {
+      statusEl.innerText = "No folder linked.";
+      statusEl.style.color = '#94a3b8';
+      syncBtn.disabled = true;
+    }
+  }
+
+  async function syncToLocalDisk() {
+    if (!localDirHandle || detectedFiles.length === 0) return;
+    const syncBtn = document.getElementById('sync-disk-btn');
+    const originalText = syncBtn.innerText;
+    syncBtn.innerText = "Syncing...";
+    syncBtn.disabled = true;
+
+    try {
+      // Prompt permission dialog if required
+      const permission = await verifyPermission(localDirHandle, true);
+      if (!permission) {
+        alert("Writing failed: Permission denied.");
+        return;
+      }
+
+      for (const file of detectedFiles) {
+        const parts = file.name.split('/');
+        let currentDir = localDirHandle;
+        for (let i = 0; i < parts.length - 1; i++) {
+          currentDir = await currentDir.getDirectoryHandle(parts[i], { create: true });
+        }
+        const fileHandle = await currentDir.getFileHandle(parts[parts.length - 1], { create: true });
+        const writable = await fileHandle.createWritable();
+        await writable.write(file.content);
+        await writable.close();
+      }
+
+      syncBtn.innerText = "Done! ✓";
+      setTimeout(() => {
+        syncBtn.innerText = originalText;
+        syncBtn.disabled = false;
+      }, 2000);
+
+    } catch (err) {
+      console.error("Local sync error:", err);
+      alert(`Sync failed: ${err.message}`);
+      syncBtn.innerText = "Failed ❌";
+      setTimeout(() => {
+        syncBtn.innerText = originalText;
+        syncBtn.disabled = false;
+      }, 2000);
+    }
+  }
+
+  async function verifyPermission(fileHandle, readWrite) {
+    const options = {};
+    if (readWrite) {
+      options.mode = 'readwrite';
+    }
+    if ((await fileHandle.queryPermission(options)) === 'granted') {
+      return true;
+    }
+    if ((await fileHandle.requestPermission(options)) === 'granted') {
+      return true;
+    }
+    return false;
+  }
+
+  // Simple IndexedDB wrapper helper to store file handles
+  function openDB() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open('ai_project_extractor_db', 1);
+      req.onupgradeneeded = () => {
+        req.result.createObjectStore('handles');
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  function setVal(db, key, val) {
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('handles', 'readwrite');
+      tx.objectStore('handles').put(val, key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  function getVal(db, key) {
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('handles', 'readonly');
+      const req = tx.objectStore('handles').get(key);
+      tx.oncomplete = () => resolve(req.result);
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  // -------------------------------------------------------------------
+  // GIT & GITHUB REST API UPLOADER
+  // -------------------------------------------------------------------
+
+  function createGitModal() {
+    let modal = document.getElementById('ai-extractor-git-modal');
+    if (modal) return;
+
+    modal = document.createElement('div');
+    modal.id = 'ai-extractor-git-modal';
+    modal.innerHTML = `
+      <div class="modal-content text-modal">
+        <div class="modal-header">
+          <h4>Configure GitHub Credentials</h4>
+          <button class="git-modal-close">&times;</button>
+        </div>
+        <div class="modal-body form-body">
+          <div class="form-group">
+            <label>GitHub Personal Access Token (PAT):</label>
+            <input type="password" id="git-token-input" placeholder="ghp_xxxxxxxxxxxx">
+            <div class="field-desc">Requires 'repo' permission scope.</div>
+          </div>
+          <div class="form-group">
+            <label>GitHub Username:</label>
+            <input type="text" id="git-username-input" placeholder="codeoba">
+          </div>
+          <div class="form-group">
+            <label>Repository Name:</label>
+            <input type="text" id="git-repo-input" placeholder="ai-project-extractor">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button id="git-save-btn" class="primary-btn">Save Config</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+
+    modal.querySelector('.git-modal-close').addEventListener('click', () => {
+      modal.style.display = 'none';
+    });
+
+    modal.querySelector('#git-save-btn').addEventListener('click', saveGitConfig);
+  }
+
+  function openGitModal() {
+    const modal = document.getElementById('ai-extractor-git-modal');
+    if (!modal) return;
+
+    chrome.storage.local.get(['github_token', 'github_username', 'github_repo'], (res) => {
+      document.getElementById('git-token-input').value = res.github_token || '';
+      document.getElementById('git-username-input').value = res.github_username || '';
+      document.getElementById('git-repo-input').value = res.github_repo || '';
+      modal.style.display = 'flex';
+    });
+  }
+
+  function saveGitConfig() {
+    const token = document.getElementById('git-token-input').value.trim();
+    const username = document.getElementById('git-username-input').value.trim();
+    const repo = document.getElementById('git-repo-input').value.trim();
+
+    if (!token || !username || !repo) {
+      alert("Please fill in all config parameters.");
+      return;
+    }
+
+    chrome.storage.local.set({
+      github_token: token,
+      github_username: username,
+      github_repo: repo
+    }, () => {
+      document.getElementById('ai-extractor-git-modal').style.display = 'none';
+      checkGitConfig();
+      renderFileList(); // Refreshes pushing action availability
+    });
+  }
+
+  function checkGitConfig() {
+    chrome.storage.local.get(['github_token', 'github_username', 'github_repo'], (res) => {
+      const pushBtn = document.getElementById('git-push-btn');
+      if (res.github_token && res.github_username && res.github_repo) {
+        if (detectedFiles.length > 0) pushBtn.disabled = false;
+      } else {
+        pushBtn.disabled = true;
+      }
+    });
+  }
+
+  async function pushProjectToGitHub() {
+    chrome.storage.local.get(['github_token', 'github_username', 'github_repo'], async (res) => {
+      const token = res.github_token;
+      const username = res.github_username;
+      const repo = res.github_repo;
+
+      if (!token || !username || !repo) {
+        alert("Please configure Git settings first.");
+        return;
+      }
+
+      const pushBtn = document.getElementById('git-push-btn');
+      const originalText = pushBtn.innerText;
+      pushBtn.innerText = "Pushing...";
+      pushBtn.disabled = true;
+
+      try {
+        // 1. Verify / Create Repo if it doesn't exist yet
+        const repoCheck = await fetch(`https://api.github.com/repos/${username}/${repo}`, {
+          headers: { 'Authorization': `token ${token}` }
+        });
+
+        if (!repoCheck.ok) {
+          // Repo does not exist, create it
+          console.log("GitHub Extractor: Repository not found. Creating a new one...");
+          const createRes = await fetch(`https://api.github.com/user/repos`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `token ${token}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              name: repo,
+              description: "Autogenerated code extract project created by AI Project Extractor Chrome Extension.",
+              auto_init: true // create master/main branch automatically
+            })
+          });
+
+          if (!createRes.ok) {
+            throw new Error(`Failed to create repository: ${createRes.statusText}`);
+          }
+          // Delay briefly to allow GitHub to provision repo initialization
+          await new Promise(r => setTimeout(r, 2000));
+        }
+
+        // 2. Push each file contents individually using contents API
+        for (const file of detectedFiles) {
+          // Check for existing file SHA to support update commits
+          let sha = null;
+          try {
+            const checkRes = await fetch(`https://api.github.com/repos/${username}/${repo}/contents/${file.name}`, {
+              headers: { 'Authorization': `token ${token}` }
+            });
+            if (checkRes.ok) {
+              const fileData = await checkRes.json();
+              sha = fileData.sha;
+            }
+          } catch (e) {
+            // file doesn't exist
+          }
+
+          // Safe Unicode base64 encode
+          const base64Content = btoa(unescape(encodeURIComponent(file.content)));
+
+          const body = {
+            message: `Sync file via AI Extractor: ${file.name}`,
+            content: base64Content
+          };
+          if (sha) body.sha = sha;
+
+          const putRes = await fetch(`https://api.github.com/repos/${username}/${repo}/contents/${file.name}`, {
+            method: 'PUT',
+            headers: {
+              'Authorization': `token ${token}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(body)
+          });
+
+          if (!putRes.ok) {
+            throw new Error(`GitHub upload failed for: ${file.name}`);
+          }
+        }
+
+        pushBtn.innerText = "Success! ✓";
+        setTimeout(() => {
+          pushBtn.innerText = originalText;
+          pushBtn.disabled = false;
+        }, 2000);
+
+      } catch (err) {
+        console.error("Git Push failed:", err);
+        alert(`Git Push failed: ${err.message}`);
+        pushBtn.innerText = "Failed ❌";
+        setTimeout(() => {
+          pushBtn.innerText = originalText;
+          pushBtn.disabled = false;
+        }, 2000);
+      }
+    });
+  }
+
+  // -------------------------------------------------------------------
+  // ZIP COMPRESSION
   // -------------------------------------------------------------------
 
   function exportAsZip() {
@@ -328,7 +914,6 @@
     const projectName = projectNameInput.value.trim() || 'ai-project';
 
     detectedFiles.forEach(file => {
-      // Add file to ZIP, creating subdirectories if needed (JSZip handles slashes automatically)
       zip.file(file.name, file.content);
     });
 
@@ -342,7 +927,7 @@
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     }).catch(err => {
-      alert(`Error generating ZIP file: ${err.message}`);
+      alert(`ZIP compilation failed: ${err.message}`);
     });
   }
 
