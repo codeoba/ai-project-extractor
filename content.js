@@ -1,4 +1,4 @@
-// AI Project Extractor - Upgraded Content Script
+// AI Project Extractor - Upgraded Content Script with Extensibility Suite
 
 (function () {
   let detectedFiles = [];
@@ -40,7 +40,67 @@
     }
   }
 
-  // Helper: clean emojis/number prefixes
+  // -------------------------------------------------------------------
+  // DYNAMIC THEME MATCHING ENGINE
+  // -------------------------------------------------------------------
+
+  function applyThemeMatching() {
+    const sidebar = document.getElementById('ai-extractor-sidebar');
+    if (!sidebar) return;
+
+    // Detect dark/light mode based on body background luminance
+    const bodyBg = window.getComputedStyle(document.body).backgroundColor;
+    const isDark = isColorDark(bodyBg);
+
+    if (isDark) {
+      sidebar.style.setProperty('--extractor-bg', 'rgba(15, 23, 42, 0.96)');
+      sidebar.style.setProperty('--extractor-text', '#f1f5f9');
+      sidebar.style.setProperty('--extractor-border', 'rgba(255, 255, 255, 0.1)');
+      sidebar.style.setProperty('--extractor-sub-bg', 'rgba(30, 41, 59, 0.4)');
+      sidebar.style.setProperty('--extractor-btn-bg', '#1e293b');
+      sidebar.style.setProperty('--extractor-btn-text', '#cbd5e1');
+    } else {
+      sidebar.style.setProperty('--extractor-bg', 'rgba(255, 255, 255, 0.96)');
+      sidebar.style.setProperty('--extractor-text', '#1e293b');
+      sidebar.style.setProperty('--extractor-border', 'rgba(0, 0, 0, 0.1)');
+      sidebar.style.setProperty('--extractor-sub-bg', 'rgba(241, 245, 249, 0.8)');
+      sidebar.style.setProperty('--extractor-btn-bg', '#e2e8f0');
+      sidebar.style.setProperty('--extractor-btn-text', '#334155');
+    }
+
+    // Adapt accent colors based on host AI platform
+    const host = window.location.hostname;
+    if (host.includes('gemini')) {
+      sidebar.style.setProperty('--extractor-accent', '#1a73e8'); // Google Blue
+      sidebar.style.setProperty('--extractor-accent-hover', '#1557b0');
+    } else if (host.includes('claude')) {
+      sidebar.style.setProperty('--extractor-accent', '#d97706'); // Anthropic Amber
+      sidebar.style.setProperty('--extractor-accent-hover', '#b45309');
+    } else if (host.includes('deepseek')) {
+      sidebar.style.setProperty('--extractor-accent', '#3b82f6'); // DeepSeek Blue
+      sidebar.style.setProperty('--extractor-accent-hover', '#1d4ed8');
+    } else if (host.includes('chatgpt')) {
+      sidebar.style.setProperty('--extractor-accent', '#10b981'); // OpenAI Green
+      sidebar.style.setProperty('--extractor-accent-hover', '#059669');
+    }
+  }
+
+  function isColorDark(colorStr) {
+    if (!colorStr) return true;
+    const rgb = colorStr.match(/\d+/g);
+    if (!rgb || rgb.length < 3) return true;
+    const r = parseInt(rgb[0]);
+    const g = parseInt(rgb[1]);
+    const b = parseInt(rgb[2]);
+    // HSP color formula to check brightness
+    const hsp = Math.sqrt(0.299 * (r * r) + 0.587 * (g * g) + 0.114 * (b * b));
+    return hsp < 127.5;
+  }
+
+  // -------------------------------------------------------------------
+  // PARSING / EXTRACTION LOGIC
+  // -------------------------------------------------------------------
+
   function cleanFilename(text) {
     if (!text) return '';
     let cleaned = text.trim();
@@ -165,14 +225,64 @@
           lang: langClass ? langClass.replace(/(?:language-|lang-)/, '') : 'text'
         });
 
-        // Store original code text for diffing purposes
         originalFiles[id] = cleanedCode;
       });
 
+      // Auto-generate runtime runner scripts if applicable
+      checkAndGenerateSetupScripts();
+
       renderFileList();
       saveProjectToHistory();
+      applyThemeMatching();
     } catch (err) {
       console.error("AI Extractor: Scan failed:", err);
+    }
+  }
+
+  // -------------------------------------------------------------------
+  // RUNTIME SETUP SCRIPT GENERATOR
+  // -------------------------------------------------------------------
+
+  function checkAndGenerateSetupScripts() {
+    const hasPyRequirements = detectedFiles.some(f => f.name.endsWith('requirements.txt'));
+    const hasNodePackage = detectedFiles.some(f => f.name.endsWith('package.json'));
+
+    if (detectedFiles.some(f => f.name === 'setup.bat' || f.name === 'setup.sh')) {
+      return;
+    }
+
+    if (hasPyRequirements) {
+      const batContent = `@echo off\necho Setting up Python Virtual Environment...\npython -m venv .venv\ncall .venv\\Scripts\\activate\necho Installing dependencies from requirements.txt...\npip install -r requirements.txt\necho Setup complete! Launching application...\npython main.py\npause\n`;
+      const shContent = `#!/bin/bash\necho "Setting up Python Virtual Environment..."\npython3 -m venv .venv\nsource .venv/bin/activate\necho "Installing dependencies from requirements.txt..."\npip install -r requirements.txt\necho "Setup complete! Launching..."\npython3 main.py\n`;
+      
+      detectedFiles.push({
+        id: `setup-bat-${Date.now()}`,
+        name: "setup.bat",
+        content: batContent,
+        lang: "bat"
+      });
+      detectedFiles.push({
+        id: `setup-sh-${Date.now()}`,
+        name: "setup.sh",
+        content: shContent,
+        lang: "bash"
+      });
+    } else if (hasNodePackage) {
+      const batContent = `@echo off\necho Installing Node.js dependencies...\ncall npm install\necho Setup complete! Launching application...\nnpm start\npause\n`;
+      const shContent = `#!/bin/bash\necho "Installing Node.js dependencies..."\nnpm install\necho "Setup complete! Launching..."\nnpm start\n`;
+
+      detectedFiles.push({
+        id: `setup-bat-${Date.now()}`,
+        name: "setup.bat",
+        content: batContent,
+        lang: "bat"
+      });
+      detectedFiles.push({
+        id: `setup-sh-${Date.now()}`,
+        name: "setup.sh",
+        content: shContent,
+        lang: "bash"
+      });
     }
   }
 
@@ -214,14 +324,15 @@
         content: file.content,
         lang: getExtensionFromLang(file.name)
       });
-      originalFiles[id] = ""; // Since template file is new, its original text was empty
+      originalFiles[id] = ""; 
     });
+    checkAndGenerateSetupScripts();
     renderFileList();
     saveProjectToHistory();
   }
 
   // -------------------------------------------------------------------
-  // PERSISTENCE (chrome.storage.local / IndexedDB)
+  // PERSISTENCE
   // -------------------------------------------------------------------
 
   function saveProjectToHistory() {
@@ -235,10 +346,8 @@
 
     chrome.storage.local.get({ history: [] }, (result) => {
       let history = result.history;
-      // Remove previous entries with matching name to overwrite/update
       history = history.filter(p => p.name !== projectName);
       history.unshift(data);
-      // Cap history to last 10 projects
       if (history.length > 10) history = history.slice(0, 10);
       chrome.storage.local.set({ history: history }, renderHistoryList);
     });
@@ -267,8 +376,7 @@
         `;
         item.querySelector('.history-load-btn').addEventListener('click', () => {
           document.getElementById('project-name-input').value = proj.name;
-          detectedFiles = JSON.parse(JSON.stringify(proj.files)); // clone files
-          // Reset original texts reference for loaded history
+          detectedFiles = JSON.parse(JSON.stringify(proj.files)); 
           detectedFiles.forEach(f => {
             originalFiles[f.id] = f.content;
           });
@@ -304,7 +412,6 @@
         <button id="sidebar-close-btn">&times;</button>
       </div>
       
-      <!-- Primary Scan Action -->
       <div class="sidebar-actions">
         <button id="scan-btn" class="primary-btn">🔍 Scan Page</button>
         <button id="export-zip-btn" class="accent-btn" disabled>📦 Export ZIP</button>
@@ -315,7 +422,6 @@
         <input type="text" id="project-name-input" value="botsales" placeholder="project-name">
       </div>
 
-      <!-- Local Directory Sync Controls -->
       <div class="sync-section">
         <div class="section-title">Local Folder Sync</div>
         <div class="sync-buttons">
@@ -325,7 +431,6 @@
         <div id="linked-folder-status" class="status-msg">No folder linked.</div>
       </div>
 
-      <!-- Git & GitHub Upload Controls -->
       <div class="git-section">
         <div class="section-title">GitHub Integration</div>
         <div class="git-buttons">
@@ -334,7 +439,6 @@
         </div>
       </div>
 
-      <!-- Boilerplate Injectors -->
       <div class="template-section">
         <div class="section-title">Templates</div>
         <div class="template-row">
@@ -348,13 +452,11 @@
         </div>
       </div>
 
-      <!-- Extracted Project History -->
       <div class="history-section">
         <div class="section-title collapsible-header" id="history-toggle">Project History (Click to Expand) ▾</div>
         <div id="history-list" class="history-content hidden"></div>
       </div>
 
-      <!-- Detected File Tree View -->
       <div class="file-list-container">
         <div class="section-title">Extracted Files</div>
         <div id="no-files-msg">No files detected yet. Click "Scan Page" to find project code.</div>
@@ -367,7 +469,6 @@
     `;
     document.body.appendChild(sidebarEl);
 
-    // Setup Git modal element
     createGitModal();
 
     // Event Listeners
@@ -376,24 +477,19 @@
     document.getElementById('scan-btn').addEventListener('click', scanForCodeBlocks);
     document.getElementById('export-zip-btn').addEventListener('click', exportAsZip);
     
-    // Directory Sync listeners
     document.getElementById('link-folder-btn').addEventListener('click', linkLocalDirectory);
     document.getElementById('sync-disk-btn').addEventListener('click', syncToLocalDisk);
 
-    // Template Injector listener
     document.getElementById('inject-btn').addEventListener('click', () => {
       const type = document.getElementById('template-select').value;
       injectTemplate(type);
     });
 
-    // Git configuration listener
     document.getElementById('git-config-btn').addEventListener('click', openGitModal);
     document.getElementById('git-push-btn').addEventListener('click', pushProjectToGitHub);
 
-    // Project name live save
     document.getElementById('project-name-input').addEventListener('input', saveProjectToHistory);
 
-    // Collapsible history section
     document.getElementById('history-toggle').addEventListener('click', () => {
       const historyList = document.getElementById('history-list');
       const header = document.getElementById('history-toggle');
@@ -405,15 +501,17 @@
       }
     });
 
-    // Startup loads
+    // Startup configuration loads
     loadDirectoryFromDB();
     renderHistoryList();
     scanForCodeBlocks();
     checkGitConfig();
+    applyThemeMatching();
   }
 
   function toggleSidebar() {
     sidebarEl.classList.toggle('open');
+    applyThemeMatching();
   }
 
   function renderFileList() {
@@ -437,7 +535,6 @@
     exportBtn.disabled = false;
     if (localDirHandle) syncBtn.disabled = false;
     
-    // Enable push if token is configured
     chrome.storage.local.get(['github_token', 'github_repo'], (res) => {
       if (res.github_token && res.github_repo) {
         pushBtn.disabled = false;
@@ -453,6 +550,7 @@
           <input type="text" class="file-name-edit" value="${file.name}" data-id="${file.id}">
           <div class="file-item-actions">
             <button class="preview-btn" title="Edit / Diff Code">👁️</button>
+            <button class="download-file-btn" title="Download File Alone">📥</button>
             <button class="delete-btn" title="Delete File">&times;</button>
           </div>
         </div>
@@ -468,6 +566,10 @@
         showPreviewModal(file);
       });
 
+      li.querySelector('.download-file-btn').addEventListener('click', () => {
+        downloadSingleFile(file);
+      });
+
       li.querySelector('.delete-btn').addEventListener('click', () => {
         detectedFiles.splice(index, 1);
         renderFileList();
@@ -479,15 +581,34 @@
   }
 
   // -------------------------------------------------------------------
+  // INDIVIDUAL FILE DOWNLOAD
+  // -------------------------------------------------------------------
+
+  function downloadSingleFile(file) {
+    try {
+      const blob = new Blob([file.content], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      // Extract clean filename without directory paths for simple saving
+      a.download = file.name.split('/').pop(); 
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert(`Single file download failed: ${err.message}`);
+    }
+  }
+
+  // -------------------------------------------------------------------
   // CODE EDITOR & DIFF VISUALIZER
   // -------------------------------------------------------------------
 
-  // Line-by-line Diff utility
   function generateDiffHTML(originalText, currentText) {
     const originalLines = originalText.split('\n');
     const currentLines = currentText.split('\n');
     let diffHTML = '';
-
     const maxLength = Math.max(originalLines.length, currentLines.length);
 
     for (let i = 0; i < maxLength; i++) {
@@ -495,10 +616,8 @@
       const curr = currentLines[i] !== undefined ? currentLines[i] : null;
 
       if (orig === curr) {
-        // Unchanged line
         diffHTML += `<div class="diff-line unchanged"><span class="line-number">${i+1}</span> <span class="line-content">${escapeHTML(curr)}</span></div>`;
       } else {
-        // Changed/diff line
         if (orig !== null) {
           diffHTML += `<div class="diff-line removed"><span class="line-number">-</span> <span class="line-content">${escapeHTML(orig)}</span></div>`;
         }
@@ -547,10 +666,8 @@
     `;
 
     modal.style.display = 'flex';
-
     const textEditor = modal.querySelector('#editor-textarea');
 
-    // Tab toggles
     const tabEditor = modal.querySelector('#tab-editor');
     const tabDiff = modal.querySelector('#tab-diff');
     const viewEditor = modal.querySelector('#editor-view');
@@ -570,7 +687,6 @@
       viewEditor.classList.add('hidden');
       viewDiff.classList.remove('hidden');
 
-      // Refresh and generate Diff
       const orig = originalFiles[file.id] || "";
       const curr = textEditor.value;
       diffContainer.innerHTML = generateDiffHTML(orig, curr);
@@ -587,7 +703,7 @@
   }
 
   // -------------------------------------------------------------------
-  // DIRECT LOCAL FOLDER SYNC (FILE SYSTEM ACCESS API)
+  // DIRECT LOCAL FOLDER SYNC
   // -------------------------------------------------------------------
 
   async function linkLocalDirectory() {
@@ -597,14 +713,13 @@
       });
       localDirHandle = handle;
 
-      // Save handle to IndexedDB
       const db = await openDB();
       await setVal(db, 'dirHandle', handle);
 
       updateSyncUI(true);
       document.getElementById('sync-disk-btn').disabled = false;
     } catch (e) {
-      console.warn("Folder sync linking rejected or failed:", e);
+      console.warn("Folder sync linking rejected:", e);
       document.getElementById('linked-folder-status').innerText = "Linking failed.";
     }
   }
@@ -631,7 +746,6 @@
     syncBtn.disabled = true;
 
     try {
-      // Prompt permission dialog if required
       const permission = await verifyPermission(localDirHandle, true);
       if (!permission) {
         alert("Writing failed: Permission denied.");
@@ -681,7 +795,6 @@
     return false;
   }
 
-  // Simple IndexedDB wrapper helper to store file handles
   function openDB() {
     return new Promise((resolve, reject) => {
       const req = indexedDB.open('ai_project_extractor_db', 1);
@@ -785,7 +898,7 @@
     }, () => {
       document.getElementById('ai-extractor-git-modal').style.display = 'none';
       checkGitConfig();
-      renderFileList(); // Refreshes pushing action availability
+      renderFileList();
     });
   }
 
@@ -817,14 +930,12 @@
       pushBtn.disabled = true;
 
       try {
-        // 1. Verify / Create Repo if it doesn't exist yet
         const repoCheck = await fetch(`https://api.github.com/repos/${username}/${repo}`, {
           headers: { 'Authorization': `token ${token}` }
         });
 
         if (!repoCheck.ok) {
-          // Repo does not exist, create it
-          console.log("GitHub Extractor: Repository not found. Creating a new one...");
+          console.log("GitHub Extractor: Creating new repository...");
           const createRes = await fetch(`https://api.github.com/user/repos`, {
             method: 'POST',
             headers: {
@@ -834,20 +945,17 @@
             body: JSON.stringify({
               name: repo,
               description: "Autogenerated code extract project created by AI Project Extractor Chrome Extension.",
-              auto_init: true // create master/main branch automatically
+              auto_init: true
             })
           });
 
           if (!createRes.ok) {
             throw new Error(`Failed to create repository: ${createRes.statusText}`);
           }
-          // Delay briefly to allow GitHub to provision repo initialization
           await new Promise(r => setTimeout(r, 2000));
         }
 
-        // 2. Push each file contents individually using contents API
         for (const file of detectedFiles) {
-          // Check for existing file SHA to support update commits
           let sha = null;
           try {
             const checkRes = await fetch(`https://api.github.com/repos/${username}/${repo}/contents/${file.name}`, {
@@ -857,13 +965,9 @@
               const fileData = await checkRes.json();
               sha = fileData.sha;
             }
-          } catch (e) {
-            // file doesn't exist
-          }
+          } catch (e) {}
 
-          // Safe Unicode base64 encode
           const base64Content = btoa(unescape(encodeURIComponent(file.content)));
-
           const body = {
             message: `Sync file via AI Extractor: ${file.name}`,
             content: base64Content
