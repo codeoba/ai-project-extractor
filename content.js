@@ -1,4 +1,4 @@
-// AI Project Extractor - Power Developer Suite Content Script (Visual Preview & Architecture Update)
+// AI Project Extractor - Power Developer Suite Content Script (Masterclass Edition)
 
 (function () {
   let detectedFiles = [];
@@ -10,6 +10,7 @@
   // Settings Cache
   let ignorePatterns = [];
   let customRegexRule = null;
+  let geminiApiKey = "";
 
   // Initial UI build
   window.addEventListener('load', () => {
@@ -34,9 +35,12 @@
   function loadSettings(callback) {
     chrome.storage.local.get({
       ignore_list: '*.log, tmp/*',
-      custom_regex: ''
+      custom_regex: '',
+      gemini_key: ''
     }, (res) => {
       ignorePatterns = res.ignore_list.split(',').map(p => p.trim()).filter(Boolean);
+      geminiApiKey = res.gemini_key.trim();
+      
       if (res.custom_regex.trim()) {
         try {
           customRegexRule = new RegExp(res.custom_regex.trim());
@@ -276,6 +280,7 @@
         });
 
         checkAndGenerateSetupScripts();
+        generateDockerConfig(); // DevOps Docker Generator
         renderFileList();
         saveProjectToHistory();
         applyThemeMatching();
@@ -283,6 +288,65 @@
         console.error("AI Extractor: Scan failed:", err);
       }
     });
+  }
+
+  // -------------------------------------------------------------------
+  // DEVOPS AUTOMATION: DOCKER GENERATOR
+  // -------------------------------------------------------------------
+
+  function generateDockerConfig() {
+    // Avoid double generation
+    if (detectedFiles.some(f => f.name === 'Dockerfile' || f.name === 'docker-compose.yml')) {
+      return;
+    }
+
+    const hasPyRequirements = detectedFiles.some(f => f.name.endsWith('requirements.txt'));
+    const hasNodePackage = detectedFiles.some(f => f.name.endsWith('package.json'));
+    const hasWPPlugin = detectedFiles.some(f => f.name.endsWith('.php') && f.content.includes('Plugin Name:'));
+
+    if (hasWPPlugin) {
+      // Create WordPress development container stack
+      const composeContent = `version: '3.8'\n\nservices:\n  db:\n    image: mariadb:10.6\n    restart: always\n    environment:\n      MYSQL_ROOT_PASSWORD: wp_root_password\n      MYSQL_DATABASE: wordpress\n      MYSQL_USER: wordpress\n      MYSQL_PASSWORD: wordpress_password\n    volumes:\n      - db_data:/var/lib/mysql\n\n  wordpress:\n    depends_on:\n      - db\n    image: wordpress:latest\n    ports:\n      - "8080:80"\n    restart: always\n    environment:\n      WORDPRESS_DB_HOST: db\n      WORDPRESS_DB_USER: wordpress\n      WORDPRESS_DB_PASSWORD: wordpress_password\n      WORDPRESS_DB_NAME: wordpress\n    volumes:\n      - wordpress_data:/var/www/html\n      # Mount plugin folder dynamically\n      - .:/var/www/html/wp-content/plugins/ai-extracted-plugin\n\nvolumes:\n  db_data:\n  wordpress_data:\n`;
+
+      detectedFiles.push({
+        id: `docker-compose-${Date.now()}`,
+        name: "docker-compose.yml",
+        content: composeContent,
+        lang: "yaml"
+      });
+    } else if (hasPyRequirements) {
+      const dockerfileContent = `FROM python:3.9-slim-buster\n\nWORKDIR /app\n\nCOPY requirements.txt .\nRUN pip install --no-cache-dir -r requirements.txt\n\nCOPY . .\n\nCMD [ "python", "main.py" ]\n`;
+      const composeContent = `version: '3.8'\n\nservices:\n  web:\n    build: .\n    volumes:\n      - .:/app\n    environment:\n      - ENV=development\n`;
+
+      detectedFiles.push({
+        id: `dockerfile-${Date.now()}`,
+        name: "Dockerfile",
+        content: dockerfileContent,
+        lang: "dockerfile"
+      });
+      detectedFiles.push({
+        id: `docker-compose-${Date.now()}`,
+        name: "docker-compose.yml",
+        content: composeContent,
+        lang: "yaml"
+      });
+    } else if (hasNodePackage) {
+      const dockerfileContent = `FROM node:18-alpine\n\nWORKDIR /usr/src/app\n\nCOPY package*.json ./\nRUN npm install\n\nCOPY . .\n\nEXPOSE 3000\nCMD [ "npm", "start" ]\n`;
+      const composeContent = `version: '3.8'\n\nservices:\n  app:\n    build: .\n    ports:\n      - "3000:3000"\n    volumes:\n      - .:/usr/src/app\n      - /usr/src/app/node_modules\n    environment:\n      - NODE_ENV=development\n`;
+
+      detectedFiles.push({
+        id: `dockerfile-${Date.now()}`,
+        name: "Dockerfile",
+        content: dockerfileContent,
+        lang: "dockerfile"
+      });
+      detectedFiles.push({
+        id: `docker-compose-${Date.now()}`,
+        name: "docker-compose.yml",
+        content: composeContent,
+        lang: "yaml"
+      });
+    }
   }
 
   // -------------------------------------------------------------------
@@ -373,6 +437,7 @@
       originalFiles[id] = ""; 
     });
     checkAndGenerateSetupScripts();
+    generateDockerConfig();
     renderFileList();
     saveProjectToHistory();
   }
@@ -470,7 +535,7 @@
       </div>
 
       <div class="settings-section">
-        <div class="section-title collapsible-header" id="settings-toggle">Settings & Filters (Click to Expand) ▾</div>
+        <div class="section-title collapsible-header" id="settings-toggle">Settings & Filters ▾</div>
         <div id="settings-content" class="settings-content hidden">
           <div class="settings-group">
             <label>Ignore List (wildcards, comma separated):</label>
@@ -479,6 +544,10 @@
           <div class="settings-group">
             <label>Custom Filename Regex (optional):</label>
             <input type="text" id="custom-regex-input" placeholder="📁\\s*([\\w\\-\\.]+\\.\\w+)">
+          </div>
+          <div class="settings-group">
+            <label>Gemini API Key (optional AI fallback):</label>
+            <input type="password" id="gemini-key-input" placeholder="AI Key for refactoring...">
           </div>
           <button id="save-settings-btn" class="sub-btn">Save Settings</button>
         </div>
@@ -530,7 +599,7 @@
       </div>
       
       <div class="sidebar-footer">
-        <span>AI Project Extractor v1.2</span>
+        <span>AI Project Extractor v1.3</span>
       </div>
     `;
     document.body.appendChild(sidebarEl);
@@ -562,13 +631,14 @@
       const content = document.getElementById('settings-content');
       const header = document.getElementById('settings-toggle');
       content.classList.toggle('hidden');
-      header.innerText = content.classList.contains('hidden') ? "Settings & Filters (Click to Expand) ▾" : "Settings & Filters ▴";
+      header.innerText = content.classList.contains('hidden') ? "Settings & Filters ▾" : "Settings & Filters ▴";
     });
 
     document.getElementById('save-settings-btn').addEventListener('click', () => {
       const ignore = document.getElementById('ignore-list-input').value;
       const regex = document.getElementById('custom-regex-input').value;
-      chrome.storage.local.set({ ignore_list: ignore, custom_regex: regex }, () => {
+      const key = document.getElementById('gemini-key-input').value;
+      chrome.storage.local.set({ ignore_list: ignore, custom_regex: regex, gemini_key: key }, () => {
         loadSettings(() => {
           alert("Settings updated!");
           scanForCodeBlocks();
@@ -577,9 +647,10 @@
     });
 
     // Populate Settings UI
-    chrome.storage.local.get({ ignore_list: '*.log, tmp/*', custom_regex: '' }, (res) => {
+    chrome.storage.local.get({ ignore_list: '*.log, tmp/*', custom_regex: '', gemini_key: '' }, (res) => {
       document.getElementById('ignore-list-input').value = res.ignore_list;
       document.getElementById('custom-regex-input').value = res.custom_regex;
+      document.getElementById('gemini-key-input').value = res.gemini_key;
     });
 
     // Live File List Filter
@@ -652,9 +723,8 @@
           <span class="file-icon">📄</span>
           <input type="text" class="file-name-edit" value="${file.name}" data-id="${file.id}">
           <div class="file-item-actions">
-            <!-- If HTML file, add instant sandbox run play icon -->
             ${file.name.endsWith('.html') ? '<button class="run-file-btn" title="Run Live Sandbox Preview">▶️</button>' : ''}
-            <button class="preview-btn" title="Edit / Diff Code">👁️</button>
+            <button class="preview-btn" title="Edit / Diff / AI Code">👁️</button>
             <button class="download-file-btn" title="Download File Alone">📥</button>
             <button class="delete-btn" title="Delete File">&times;</button>
           </div>
@@ -724,18 +794,15 @@
       modal.style.display = 'none';
     });
 
-    // Compile self-contained document by inlining CSS and JS
     let compiledHTML = htmlFile.content;
 
     detectedFiles.forEach(file => {
       if (file.name.endsWith('.css')) {
         const cleanName = file.name.split('/').pop();
-        // Replace stylesheet link tags with style elements
         const linkPattern = new RegExp(`<link[^>]*href=["'][^"']*${cleanName}["'][^>]*>`, 'gi');
         compiledHTML = compiledHTML.replace(linkPattern, `<style>${file.content}</style>`);
       } else if (file.name.endsWith('.js')) {
         const cleanName = file.name.split('/').pop();
-        // Replace script source links with script tags containing actual code
         const scriptPattern = new RegExp(`<script[^>]*src=["'][^"']*${cleanName}["'][^>]*>\\s*</script>`, 'gi');
         compiledHTML = compiledHTML.replace(scriptPattern, `<script>${file.content}</script>`);
       }
@@ -774,7 +841,6 @@
       modal.style.display = 'none';
     });
 
-    // Generate Visual Tree Structure
     const canvas = modal.querySelector('#map-tree-canvas');
     canvas.innerHTML = generateVisualTreeHTML();
   }
@@ -783,7 +849,6 @@
     const projectNameInput = document.getElementById('project-name-input');
     const projectName = projectNameInput.value.trim() || 'root';
 
-    // Parse detectedFiles into a tree map
     const tree = { name: projectName, type: 'directory', children: {} };
 
     detectedFiles.forEach(file => {
@@ -802,7 +867,6 @@
       });
     });
 
-    // Generate nested HTML branches
     function renderNode(node) {
       if (node.type === 'file') {
         return `<div class="tree-node-file">📄 ${node.name}</div>`;
@@ -915,26 +979,52 @@
           <div class="modal-title-tabs">
             <button id="tab-editor" class="tab-btn active">✏️ Editor</button>
             <button id="tab-diff" class="tab-btn">⚖️ Diff Viewer</button>
+            <button id="tab-ai" class="tab-btn">🤖 AI Assistant</button>
           </div>
           <button class="modal-close">&times;</button>
         </div>
         
         <div class="modal-body">
+          <!-- Editor Panel -->
           <div id="editor-view" class="tab-panel">
             <div class="editor-search-replace-row">
               <input type="text" id="editor-find-input" placeholder="Find text...">
               <input type="text" id="editor-replace-input" placeholder="Replace with...">
               <button id="editor-replace-btn" class="editor-action-btn">Replace All</button>
             </div>
-            
             <textarea class="code-preview-area" id="editor-textarea">${file.content}</textarea>
-            
             <div id="editor-linter-log" class="linter-log-banner hidden"></div>
           </div>
+
+          <!-- Diff Panel -->
           <div id="diff-view" class="tab-panel hidden">
             <div class="diff-container" id="diff-container"></div>
           </div>
+
+          <!-- AI Assistant Panel -->
+          <div id="ai-view" class="tab-panel hidden">
+            <div class="ai-controls-row">
+              <select id="ai-task-select">
+                <option value="explain">Explain Code</option>
+                <option value="refactor">Optimize & Refactor Code</option>
+                <option value="test">Generate Unit Tests</option>
+                <option value="custom">Custom Instruction</option>
+              </select>
+              <input type="text" id="ai-custom-prompt" class="hidden" placeholder="Describe instructions (e.g. rewrite in ES6)...">
+              <button id="ai-run-btn" class="editor-action-btn">Run AI</button>
+            </div>
+            
+            <div class="ai-output-container">
+              <div id="ai-loading" class="ai-loading-spinner hidden">🤖 Processing code via AI...</div>
+              <textarea readonly id="ai-output-textarea" placeholder="AI code output will appear here..."></textarea>
+            </div>
+            
+            <div class="ai-apply-row">
+              <button id="ai-apply-btn" class="accent-btn" disabled>Apply Changes to Editor</button>
+            </div>
+          </div>
         </div>
+        
         <div class="modal-footer">
           <button id="modal-save-btn" class="modal-save-btn primary-btn">Save Changes</button>
         </div>
@@ -947,10 +1037,15 @@
 
     const tabEditor = modal.querySelector('#tab-editor');
     const tabDiff = modal.querySelector('#tab-diff');
+    const tabAI = modal.querySelector('#tab-ai');
+    
     const viewEditor = modal.querySelector('#editor-view');
     const viewDiff = modal.querySelector('#diff-view');
+    const viewAI = modal.querySelector('#ai-view');
+    
     const diffContainer = modal.querySelector('#diff-container');
 
+    // Run syntax linter
     function runLinter() {
       const lint = validateCodeSyntax(textEditor.value, file.name.split('.').pop());
       if (lint.ok) {
@@ -964,6 +1059,7 @@
     textEditor.addEventListener('input', runLinter);
     runLinter(); 
 
+    // Find & replace
     modal.querySelector('#editor-replace-btn').addEventListener('click', () => {
       const findVal = modal.querySelector('#editor-find-input').value;
       const replaceVal = modal.querySelector('#editor-replace-input').value;
@@ -974,22 +1070,98 @@
       runLinter();
     });
 
+    // Tab clicks
     tabEditor.addEventListener('click', () => {
       tabEditor.classList.add('active');
       tabDiff.classList.remove('active');
+      tabAI.classList.remove('active');
       viewEditor.classList.remove('hidden');
       viewDiff.classList.add('hidden');
+      viewAI.classList.add('hidden');
     });
 
     tabDiff.addEventListener('click', () => {
       tabEditor.classList.remove('active');
       tabDiff.classList.add('active');
+      tabAI.classList.remove('active');
       viewEditor.classList.add('hidden');
       viewDiff.classList.remove('hidden');
+      viewAI.classList.add('hidden');
 
       const orig = originalFiles[file.id] || "";
       const curr = textEditor.value;
       diffContainer.innerHTML = generateDiffHTML(orig, curr);
+    });
+
+    tabAI.addEventListener('click', () => {
+      tabEditor.classList.remove('active');
+      tabDiff.classList.remove('active');
+      tabAI.classList.add('active');
+      viewEditor.classList.add('hidden');
+      viewDiff.classList.add('hidden');
+      viewAI.classList.remove('hidden');
+    });
+
+    // Toggle custom prompt input field
+    const taskSelect = modal.querySelector('#ai-task-select');
+    const customPromptInput = modal.querySelector('#ai-custom-prompt');
+    taskSelect.addEventListener('change', () => {
+      if (taskSelect.value === 'custom') {
+        customPromptInput.classList.remove('hidden');
+      } else {
+        customPromptInput.classList.add('hidden');
+      }
+    });
+
+    // Run AI generation click
+    const aiRunBtn = modal.querySelector('#ai-run-btn');
+    const aiOutputText = modal.querySelector('#ai-output-textarea');
+    const aiLoading = modal.querySelector('#ai-loading');
+    const aiApplyBtn = modal.querySelector('#ai-apply-btn');
+
+    aiRunBtn.addEventListener('click', async () => {
+      const task = taskSelect.value;
+      let promptText = "";
+      let systemPrompt = "You are a professional software engineer. Provide optimized code. Do not wrap code in markdown ticks (` ` `) in the final output unless requested; return ONLY the clean code output so it can be directly saved.";
+
+      if (task === 'explain') {
+        promptText = `Explain the following code clearly:\n\n${textEditor.value}`;
+        systemPrompt = "Explain code concisely.";
+      } else if (task === 'refactor') {
+        promptText = `Refactor and optimize the following code:\n\n${textEditor.value}`;
+      } else if (task === 'test') {
+        promptText = `Write automated unit tests for this code:\n\n${textEditor.value}`;
+      } else {
+        const custom = customPromptInput.value.trim() || "Analyze code";
+        promptText = `${custom}:\n\n${textEditor.value}`;
+      }
+
+      aiLoading.classList.remove('hidden');
+      aiOutputText.value = "";
+      aiApplyBtn.disabled = true;
+
+      try {
+        const aiResponse = await callGeminiAI(promptText, systemPrompt);
+        // Clean markdown backticks if returned
+        let cleanedResponse = aiResponse;
+        if (cleanedResponse.startsWith('```') && cleanedResponse.endsWith('```')) {
+          const lines = cleanedResponse.split('\n');
+          cleanedResponse = lines.slice(1, -1).join('\n');
+        }
+        aiOutputText.value = cleanedResponse;
+        aiApplyBtn.disabled = false;
+      } catch (err) {
+        aiOutputText.value = `AI Generation failed: ${err.message}\n\nMake sure to add a valid Gemini Key in the extension Settings if Chrome's local window.ai is disabled.`;
+      } finally {
+        aiLoading.classList.add('hidden');
+      }
+    });
+
+    // Apply AI changes
+    aiApplyBtn.addEventListener('click', () => {
+      textEditor.value = aiOutputText.value;
+      runLinter();
+      tabEditor.click();
     });
 
     const closeFn = () => { modal.style.display = 'none'; };
@@ -1000,6 +1172,51 @@
       saveProjectToHistory();
       closeFn();
     });
+  }
+
+  // -------------------------------------------------------------------
+  // NATIVE OR FALLBACK GEMINI AI CALLER
+  // -------------------------------------------------------------------
+
+  async function callGeminiAI(prompt, systemInstruction) {
+    // Attempt 1: Chrome Local window.ai (Gemini Nano)
+    const localAI = window.ai || (window.chrome && window.chrome.aiOriginTrial);
+    if (localAI && localAI.assistant) {
+      try {
+        console.log("AI Extractor: Initializing local window.ai session...");
+        const session = await localAI.assistant.create({
+          systemPrompt: systemInstruction
+        });
+        const result = await session.prompt(prompt);
+        session.destroy();
+        return result;
+      } catch (e) {
+        console.warn("Local window.ai failed, attempting API key fallback...", e);
+      }
+    }
+
+    // Attempt 2: External Gemini API Fallback
+    if (geminiApiKey) {
+      console.log("AI Extractor: Invoking external Gemini API...");
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: `${systemInstruction}\n\n${prompt}` }] }]
+        })
+      });
+
+      if (!res.ok) {
+        throw new Error(`API fetch error: ${res.statusText}`);
+      }
+      const data = await res.json();
+      if (data.candidates && data.candidates[0].content && data.candidates[0].content.parts) {
+        return data.candidates[0].content.parts[0].text;
+      }
+      throw new Error("Invalid response schema from Gemini API.");
+    }
+
+    throw new Error("No AI providers configured. Enable optimization-guide in chrome://flags or add a Gemini API Key in the settings panel.");
   }
 
   // -------------------------------------------------------------------
@@ -1115,6 +1332,7 @@
     });
   }
 
+  // Helper
   function getVal(db, key) {
     return new Promise((resolve, reject) => {
       const tx = db.transaction('handles', 'readonly');
