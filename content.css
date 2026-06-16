@@ -1,4 +1,4 @@
-/* AI Project Extractor - Themeable Upgraded Stylesheet */
+/* AI Project Extractor - Power Developer Suite Stylesheet */
 
 #ai-extractor-sidebar {
   /* Dynamic style tokens */
@@ -183,9 +183,67 @@
 }
 
 /* Sub Sections wrapper styling */
-.sync-section, .git-section, .template-section, .history-section, .project-info {
+.sync-section, .git-section, .template-section, .history-section, .project-info, .settings-section {
   padding: 8px 20px;
   border-bottom: 1px solid var(--extractor-border);
+}
+
+/* Settings Form Styles */
+.settings-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.settings-content.hidden {
+  display: none !important;
+}
+
+.settings-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settings-group label {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.settings-group input {
+  background-color: var(--extractor-btn-bg);
+  border: 1px solid var(--extractor-border);
+  color: var(--extractor-text);
+  border-radius: 4px;
+  padding: 6px;
+  font-size: 12px;
+  outline: none;
+}
+
+.settings-group input:focus {
+  border-color: var(--extractor-accent);
+}
+
+/* Search Box Container */
+.file-search-section {
+  padding: 10px 20px 5px 20px;
+}
+
+#file-search-input {
+  width: 100%;
+  box-sizing: border-box;
+  background-color: var(--extractor-btn-bg);
+  border: 1px solid var(--extractor-border);
+  color: var(--extractor-text);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 12px;
+  outline: none;
+}
+
+#file-search-input:focus {
+  border-color: var(--extractor-accent);
 }
 
 .sync-buttons, .git-buttons {
@@ -325,7 +383,7 @@
 #ai-extractor-sidebar .file-list-container {
   flex: 1;
   overflow-y: auto;
-  padding: 15px 20px;
+  padding: 10px 20px;
 }
 
 #no-files-msg {
@@ -630,4 +688,60 @@
 
 .diff-line.unchanged {
   color: #94a3b8;
+}
+
+/* Find / Replace styling inside editor */
+.editor-search-replace-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 4px 0;
+  box-sizing: border-box;
+}
+
+.editor-search-replace-row input {
+  flex: 1;
+  background: #020617;
+  border: 1px solid #1e293b;
+  border-radius: 4px;
+  color: #e2e8f0;
+  padding: 6px 10px;
+  font-size: 12px;
+  outline: none;
+}
+
+.editor-search-replace-row input:focus {
+  border-color: var(--extractor-accent);
+}
+
+.editor-action-btn {
+  background: var(--extractor-accent);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.editor-action-btn:hover {
+  background: var(--extractor-accent-hover);
+}
+
+/* Linter Warning banner styling */
+.linter-log-banner {
+  background-color: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: #f59e0b;
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-top: 8px;
+  font-size: 12px;
+  font-family: monospace;
+}
+
+.linter-log-banner.hidden {
+  display: none !important;
 }

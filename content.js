@@ -1,11 +1,15 @@
-// AI Project Extractor - Upgraded Content Script with Extensibility Suite
+// AI Project Extractor - Power Developer Suite Content Script
 
 (function () {
   let detectedFiles = [];
   let sidebarEl = null;
   let floatingBtnEl = null;
   let localDirHandle = null;
-  let originalFiles = {}; // Stores original code text for diffing
+  let originalFiles = {}; 
+
+  // Settings Cache
+  let ignorePatterns = [];
+  let customRegexRule = null;
 
   // Initial UI build
   window.addEventListener('load', () => {
@@ -26,7 +30,28 @@
     }
   }).observe(document, { subtree: true, childList: true });
 
-  // Load directory handle from IndexedDB if possible on startup
+  // Load configuration from storage
+  function loadSettings(callback) {
+    chrome.storage.local.get({
+      ignore_list: '*.log, tmp/*',
+      custom_regex: ''
+    }, (res) => {
+      ignorePatterns = res.ignore_list.split(',').map(p => p.trim()).filter(Boolean);
+      if (res.custom_regex.trim()) {
+        try {
+          customRegexRule = new RegExp(res.custom_regex.trim());
+        } catch(e) {
+          console.error("Invalid custom regex:", e);
+          customRegexRule = null;
+        }
+      } else {
+        customRegexRule = null;
+      }
+      if (callback) callback();
+    });
+  }
+
+  // Load directory handle from IndexedDB
   async function loadDirectoryFromDB() {
     try {
       const db = await openDB();
@@ -36,7 +61,7 @@
         updateSyncUI(true);
       }
     } catch (e) {
-      console.log("IndexedDB dir handle load failed: ", e);
+      console.log("IndexedDB load failed: ", e);
     }
   }
 
@@ -48,7 +73,6 @@
     const sidebar = document.getElementById('ai-extractor-sidebar');
     if (!sidebar) return;
 
-    // Detect dark/light mode based on body background luminance
     const bodyBg = window.getComputedStyle(document.body).backgroundColor;
     const isDark = isColorDark(bodyBg);
 
@@ -68,19 +92,18 @@
       sidebar.style.setProperty('--extractor-btn-text', '#334155');
     }
 
-    // Adapt accent colors based on host AI platform
     const host = window.location.hostname;
     if (host.includes('gemini')) {
-      sidebar.style.setProperty('--extractor-accent', '#1a73e8'); // Google Blue
+      sidebar.style.setProperty('--extractor-accent', '#1a73e8'); 
       sidebar.style.setProperty('--extractor-accent-hover', '#1557b0');
     } else if (host.includes('claude')) {
-      sidebar.style.setProperty('--extractor-accent', '#d97706'); // Anthropic Amber
+      sidebar.style.setProperty('--extractor-accent', '#d97706'); 
       sidebar.style.setProperty('--extractor-accent-hover', '#b45309');
     } else if (host.includes('deepseek')) {
-      sidebar.style.setProperty('--extractor-accent', '#3b82f6'); // DeepSeek Blue
+      sidebar.style.setProperty('--extractor-accent', '#3b82f6'); 
       sidebar.style.setProperty('--extractor-accent-hover', '#1d4ed8');
     } else if (host.includes('chatgpt')) {
-      sidebar.style.setProperty('--extractor-accent', '#10b981'); // OpenAI Green
+      sidebar.style.setProperty('--extractor-accent', '#10b981'); 
       sidebar.style.setProperty('--extractor-accent-hover', '#059669');
     }
   }
@@ -92,13 +115,12 @@
     const r = parseInt(rgb[0]);
     const g = parseInt(rgb[1]);
     const b = parseInt(rgb[2]);
-    // HSP color formula to check brightness
     const hsp = Math.sqrt(0.299 * (r * r) + 0.587 * (g * g) + 0.114 * (b * b));
     return hsp < 127.5;
   }
 
   // -------------------------------------------------------------------
-  // PARSING / EXTRACTION LOGIC
+  // PARSING / EXTRACTION LOGIC WITH CUSTOM RULES & IGNORES
   // -------------------------------------------------------------------
 
   function cleanFilename(text) {
@@ -110,16 +132,35 @@
     return cleaned;
   }
 
+  // Helper to convert wildcard patterns to Regex (e.g. *.log -> .*\.log$)
+  function wildcardToRegex(pattern) {
+    const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+    return new RegExp('^' + escaped.replace(/\*/g, '.*') + '$', 'i');
+  }
+
+  function shouldIgnoreFile(filename) {
+    return ignorePatterns.some(pattern => {
+      const regex = wildcardToRegex(pattern);
+      return regex.test(filename);
+    });
+  }
+
   function getFilenameFromPrecedingSiblings(preElement) {
-    const fileRegex = /(?:📁|\d+[\.\)]|\s)*([a-zA-Z0-9_\-\.\/]+\.[a-zA-Z0-9]+)/;
+    // Check custom regex first
+    let fileRegex = customRegexRule || /(?:📁|\d+[\.\)]|\s)*([a-zA-Z0-9_\-\.\/]+\.[a-zA-Z0-9]+)/;
+    
     let sibling = preElement.previousElementSibling;
     let count = 0;
     while (sibling && count < 3) {
       const text = sibling.innerText || sibling.textContent || '';
       if (text.length < 150 && text.trim().length > 0) {
         const match = text.match(fileRegex);
-        if (match && match[1].includes('.')) {
-          return cleanFilename(match[1]);
+        if (match) {
+          // If custom regex matches, capture group 1 holds the name, otherwise whole match
+          const val = match[1] || match[0];
+          if (val.includes('.') || customRegexRule) {
+            return cleanFilename(val);
+          }
         }
       }
       sibling = sibling.previousElementSibling;
@@ -134,8 +175,11 @@
         const text = sibling.innerText || sibling.textContent || '';
         if (text.length < 150 && text.trim().length > 0) {
           const match = text.match(fileRegex);
-          if (match && match[1].includes('.')) {
-            return cleanFilename(match[1]);
+          if (match) {
+            const val = match[1] || match[0];
+            if (val.includes('.') || customRegexRule) {
+              return cleanFilename(val);
+            }
           }
         }
         sibling = sibling.previousElementSibling;
@@ -180,63 +224,69 @@
   }
 
   function scanForCodeBlocks() {
-    try {
-      console.log("AI Extractor: Starting scan...");
-      detectedFiles = [];
-      const preElements = document.querySelectorAll('pre');
+    loadSettings(() => {
+      try {
+        console.log("AI Extractor: Starting scan...");
+        detectedFiles = [];
+        const preElements = document.querySelectorAll('pre');
 
-      preElements.forEach((pre, index) => {
-        const codeEl = pre.querySelector('code') || pre;
-        const codeText = codeEl.innerText || codeEl.textContent || '';
-        if (!codeText.trim()) return;
+        preElements.forEach((pre, index) => {
+          const codeEl = pre.querySelector('code') || pre;
+          const codeText = codeEl.innerText || codeEl.textContent || '';
+          if (!codeText.trim()) return;
 
-        let langClass = '';
-        if (codeEl.classList) {
-          codeEl.classList.forEach(cls => {
-            if (cls.startsWith('language-') || cls.startsWith('lang-') || cls.startsWith('hljs')) {
-              langClass = cls;
-            }
-          });
-        }
-
-        let filename = getFilenameFromPrecedingSiblings(pre);
-        if (!filename) {
-          filename = getFilenameFromCodeHeader(codeText, langClass);
-        }
-        if (!filename) {
-          const ext = getExtensionFromLang(langClass);
-          filename = `file_${index + 1}.${ext}`;
-        }
-
-        let cleanedCode = codeText;
-        const lines = codeText.split('\n');
-        if (lines.length > 0) {
-          const firstLineClean = lines[0].replace(/^[#\/\/\|\*\-\s]+/, '').trim();
-          if (firstLineClean.toLowerCase() === filename.toLowerCase()) {
-            cleanedCode = lines.slice(1).join('\n');
+          let langClass = '';
+          if (codeEl.classList) {
+            codeEl.classList.forEach(cls => {
+              if (cls.startsWith('language-') || cls.startsWith('lang-') || cls.startsWith('hljs')) {
+                langClass = cls;
+              }
+            });
           }
-        }
 
-        const id = `file-${index}`;
-        detectedFiles.push({
-          id: id,
-          name: filename,
-          content: cleanedCode,
-          lang: langClass ? langClass.replace(/(?:language-|lang-)/, '') : 'text'
+          let filename = getFilenameFromPrecedingSiblings(pre);
+          if (!filename) {
+            filename = getFilenameFromCodeHeader(codeText, langClass);
+          }
+          if (!filename) {
+            const ext = getExtensionFromLang(langClass);
+            filename = `file_${index + 1}.${ext}`;
+          }
+
+          // Skip if ignore pattern matches
+          if (shouldIgnoreFile(filename)) {
+            console.log(`AI Extractor: Ignored file matching settings: ${filename}`);
+            return;
+          }
+
+          let cleanedCode = codeText;
+          const lines = codeText.split('\n');
+          if (lines.length > 0) {
+            const firstLineClean = lines[0].replace(/^[#\/\/\|\*\-\s]+/, '').trim();
+            if (firstLineClean.toLowerCase() === filename.toLowerCase()) {
+              cleanedCode = lines.slice(1).join('\n');
+            }
+          }
+
+          const id = `file-${index}`;
+          detectedFiles.push({
+            id: id,
+            name: filename,
+            content: cleanedCode,
+            lang: langClass ? langClass.replace(/(?:language-|lang-)/, '') : 'text'
+          });
+
+          originalFiles[id] = cleanedCode;
         });
 
-        originalFiles[id] = cleanedCode;
-      });
-
-      // Auto-generate runtime runner scripts if applicable
-      checkAndGenerateSetupScripts();
-
-      renderFileList();
-      saveProjectToHistory();
-      applyThemeMatching();
-    } catch (err) {
-      console.error("AI Extractor: Scan failed:", err);
-    }
+        checkAndGenerateSetupScripts();
+        renderFileList();
+        saveProjectToHistory();
+        applyThemeMatching();
+      } catch (err) {
+        console.error("AI Extractor: Scan failed:", err);
+      }
+    });
   }
 
   // -------------------------------------------------------------------
@@ -422,6 +472,22 @@
         <input type="text" id="project-name-input" value="botsales" placeholder="project-name">
       </div>
 
+      <!-- Settings Section -->
+      <div class="settings-section">
+        <div class="section-title collapsible-header" id="settings-toggle">Settings & Filters (Click to Expand) ▾</div>
+        <div id="settings-content" class="settings-content hidden">
+          <div class="settings-group">
+            <label>Ignore List (wildcards, comma separated):</label>
+            <input type="text" id="ignore-list-input" placeholder="*.log, tmp/*">
+          </div>
+          <div class="settings-group">
+            <label>Custom Filename Regex (optional):</label>
+            <input type="text" id="custom-regex-input" placeholder="📁\\s*([\\w\\-\\.]+\\.\\w+)">
+          </div>
+          <button id="save-settings-btn" class="sub-btn">Save Settings</button>
+        </div>
+      </div>
+
       <div class="sync-section">
         <div class="section-title">Local Folder Sync</div>
         <div class="sync-buttons">
@@ -453,8 +519,13 @@
       </div>
 
       <div class="history-section">
-        <div class="section-title collapsible-header" id="history-toggle">Project History (Click to Expand) ▾</div>
+        <div class="section-title collapsible-header" id="history-toggle">Project History ▾</div>
         <div id="history-list" class="history-content hidden"></div>
+      </div>
+
+      <!-- File tree search filter -->
+      <div class="file-search-section">
+        <input type="text" id="file-search-input" placeholder="🔍 Search file names or contents...">
       </div>
 
       <div class="file-list-container">
@@ -464,7 +535,7 @@
       </div>
       
       <div class="sidebar-footer">
-        <span>AI Project Extractor v1.1</span>
+        <span>AI Project Extractor v1.2</span>
       </div>
     `;
     document.body.appendChild(sidebarEl);
@@ -490,18 +561,44 @@
 
     document.getElementById('project-name-input').addEventListener('input', saveProjectToHistory);
 
+    // Collapsible Settings
+    document.getElementById('settings-toggle').addEventListener('click', () => {
+      const content = document.getElementById('settings-content');
+      const header = document.getElementById('settings-toggle');
+      content.classList.toggle('hidden');
+      header.innerText = content.classList.contains('hidden') ? "Settings & Filters (Click to Expand) ▾" : "Settings & Filters ▴";
+    });
+
+    document.getElementById('save-settings-btn').addEventListener('click', () => {
+      const ignore = document.getElementById('ignore-list-input').value;
+      const regex = document.getElementById('custom-regex-input').value;
+      chrome.storage.local.set({ ignore_list: ignore, custom_regex: regex }, () => {
+        loadSettings(() => {
+          alert("Settings updated!");
+          scanForCodeBlocks();
+        });
+      });
+    });
+
+    // Populate Settings UI
+    chrome.storage.local.get({ ignore_list: '*.log, tmp/*', custom_regex: '' }, (res) => {
+      document.getElementById('ignore-list-input').value = res.ignore_list;
+      document.getElementById('custom-regex-input').value = res.custom_regex;
+    });
+
+    // Live File List Filter Search Box
+    document.getElementById('file-search-input').addEventListener('input', renderFileList);
+
+    // Collapsible history section
     document.getElementById('history-toggle').addEventListener('click', () => {
       const historyList = document.getElementById('history-list');
       const header = document.getElementById('history-toggle');
       historyList.classList.toggle('hidden');
-      if (historyList.classList.contains('hidden')) {
-        header.innerText = "Project History (Click to Expand) ▾";
-      } else {
-        header.innerText = "Project History ▴";
-      }
+      header.innerText = historyList.classList.contains('hidden') ? "Project History ▾" : "Project History ▴";
     });
 
-    // Startup configuration loads
+    // Startup configurations
+    loadSettings();
     loadDirectoryFromDB();
     renderHistoryList();
     scanForCodeBlocks();
@@ -520,11 +617,19 @@
     const exportBtn = document.getElementById('export-zip-btn');
     const syncBtn = document.getElementById('sync-disk-btn');
     const pushBtn = document.getElementById('git-push-btn');
+    const searchVal = document.getElementById('file-search-input').value.toLowerCase().trim();
 
     listEl.innerHTML = '';
 
-    if (detectedFiles.length === 0) {
+    // Filter files
+    const filteredFiles = detectedFiles.filter(file => {
+      if (!searchVal) return true;
+      return file.name.toLowerCase().includes(searchVal) || file.content.toLowerCase().includes(searchVal);
+    });
+
+    if (filteredFiles.length === 0) {
       noFilesEl.style.display = 'block';
+      noFilesEl.innerText = searchVal ? "No matching files found." : "No files detected yet. Click 'Scan Page' to find project code.";
       exportBtn.disabled = true;
       syncBtn.disabled = true;
       pushBtn.disabled = true;
@@ -541,7 +646,7 @@
       }
     });
 
-    detectedFiles.forEach((file, index) => {
+    filteredFiles.forEach((file, index) => {
       const li = document.createElement('li');
       li.className = 'file-item';
       li.innerHTML = `
@@ -571,9 +676,12 @@
       });
 
       li.querySelector('.delete-btn').addEventListener('click', () => {
-        detectedFiles.splice(index, 1);
-        renderFileList();
-        saveProjectToHistory();
+        const idx = detectedFiles.findIndex(f => f.id === file.id);
+        if (idx !== -1) {
+          detectedFiles.splice(idx, 1);
+          renderFileList();
+          saveProjectToHistory();
+        }
       });
 
       listEl.appendChild(li);
@@ -590,7 +698,6 @@
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      // Extract clean filename without directory paths for simple saving
       a.download = file.name.split('/').pop(); 
       document.body.appendChild(a);
       a.click();
@@ -602,8 +709,34 @@
   }
 
   // -------------------------------------------------------------------
-  // CODE EDITOR & DIFF VISUALIZER
+  // CODE EDITOR & DIFF VISUALIZER & LINTER & SEARCH/REPLACE
   // -------------------------------------------------------------------
+
+  // Simple runtime syntax validation (Linter)
+  function validateCodeSyntax(content, lang) {
+    if (!content.trim()) return { ok: true };
+    const format = lang.toLowerCase();
+    
+    if (format === 'json') {
+      try {
+        JSON.parse(content);
+        return { ok: true };
+      } catch(e) {
+        return { ok: false, message: `JSON syntax error: ${e.message}` };
+      }
+    }
+    
+    if (format === 'javascript' || format === 'js') {
+      try {
+        new Function(content); // Basic JS structural checks
+        return { ok: true };
+      } catch(e) {
+        return { ok: false, message: `JS parsing warning: ${e.message}` };
+      }
+    }
+    
+    return { ok: true };
+  }
 
   function generateDiffHTML(originalText, currentText) {
     const originalLines = originalText.split('\n');
@@ -651,9 +784,20 @@
           </div>
           <button class="modal-close">&times;</button>
         </div>
+        
         <div class="modal-body">
           <div id="editor-view" class="tab-panel">
+            <!-- Search & Replace Controls inside Editor -->
+            <div class="editor-search-replace-row">
+              <input type="text" id="editor-find-input" placeholder="Find text...">
+              <input type="text" id="editor-replace-input" placeholder="Replace with...">
+              <button id="editor-replace-btn" class="editor-action-btn">Replace All</button>
+            </div>
+            
             <textarea class="code-preview-area" id="editor-textarea">${file.content}</textarea>
+            
+            <!-- Real-time Linter warning logging log -->
+            <div id="editor-linter-log" class="linter-log-banner hidden"></div>
           </div>
           <div id="diff-view" class="tab-panel hidden">
             <div class="diff-container" id="diff-container"></div>
@@ -667,12 +811,39 @@
 
     modal.style.display = 'flex';
     const textEditor = modal.querySelector('#editor-textarea');
+    const linterEl = modal.querySelector('#editor-linter-log');
 
     const tabEditor = modal.querySelector('#tab-editor');
     const tabDiff = modal.querySelector('#tab-diff');
     const viewEditor = modal.querySelector('#editor-view');
     const viewDiff = modal.querySelector('#diff-view');
     const diffContainer = modal.querySelector('#diff-container');
+
+    // Live Syntax Checking / Linter
+    function runLinter() {
+      const lint = validateCodeSyntax(textEditor.value, file.name.split('.').pop());
+      if (lint.ok) {
+        linterEl.classList.add('hidden');
+        linterEl.innerText = '';
+      } else {
+        linterEl.classList.remove('hidden');
+        linterEl.innerText = lint.message;
+      }
+    }
+    textEditor.addEventListener('input', runLinter);
+    runLinter(); // Run once initially
+
+    // Find & Replace actions
+    modal.querySelector('#editor-replace-btn').addEventListener('click', () => {
+      const findVal = modal.querySelector('#editor-find-input').value;
+      const replaceVal = modal.querySelector('#editor-replace-input').value;
+      if (!findVal) return;
+      const content = textEditor.value;
+      // Global string replacement
+      const newContent = content.split(findVal).join(replaceVal);
+      textEditor.value = newContent;
+      runLinter();
+    });
 
     tabEditor.addEventListener('click', () => {
       tabEditor.classList.add('active');
