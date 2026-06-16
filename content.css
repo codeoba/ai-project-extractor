@@ -1,4 +1,4 @@
-/* AI Project Extractor - Power Developer Suite Stylesheet */
+/* AI Project Extractor - Visual Suite Additions Stylesheet */
 
 #ai-extractor-sidebar {
   /* Dynamic style tokens */
@@ -136,7 +136,7 @@
 #ai-extractor-sidebar .primary-btn {
   background-color: #3b82f6;
   color: white;
-  flex: 1;
+  flex: 1.2;
 }
 
 #ai-extractor-sidebar .primary-btn:hover {
@@ -474,6 +474,10 @@
   color: #34d399;
 }
 
+.file-item-actions .run-file-btn:hover {
+  color: #f59e0b;
+}
+
 .file-item-actions .delete-btn:hover {
   color: #f87171;
 }
@@ -488,7 +492,7 @@
 }
 
 /* Code Preview Modal with Tabs */
-#ai-extractor-preview-modal, #ai-extractor-git-modal {
+#ai-extractor-preview-modal, #ai-extractor-git-modal, #ai-extractor-sandbox-modal, #ai-extractor-map-modal {
   position: fixed;
   top: 0;
   left: 0;
@@ -505,7 +509,7 @@
   box-sizing: border-box;
 }
 
-#ai-extractor-preview-modal .modal-content, #ai-extractor-git-modal .modal-content {
+#ai-extractor-preview-modal .modal-content, #ai-extractor-git-modal .modal-content, #ai-extractor-sandbox-modal .modal-content, #ai-extractor-map-modal .modal-content {
   background: #0f172a;
   border: 1px solid rgba(255, 255, 255, 0.1);
   box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
@@ -532,7 +536,7 @@
   align-items: center;
 }
 
-.modal-close, .git-modal-close {
+.modal-close, .git-modal-close, .sandbox-modal-close, .map-modal-close {
   background: none;
   border: none;
   color: #94a3b8;
@@ -540,7 +544,7 @@
   cursor: pointer;
 }
 
-.modal-close:hover, .git-modal-close:hover {
+.modal-close:hover, .git-modal-close:hover, .sandbox-modal-close:hover, .map-modal-close:hover {
   color: #f87171;
 }
 
@@ -744,4 +748,76 @@
 
 .linter-log-banner.hidden {
   display: none !important;
+}
+
+/* Live Preview Modal Styling */
+.preview-body {
+  padding: 0 !important;
+  background: white;
+  overflow: hidden;
+}
+
+#sandbox-iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: white;
+}
+
+/* Architecture Map Styling */
+.map-body {
+  overflow: auto;
+  background: #090d16;
+}
+
+.architecture-tree-canvas {
+  padding: 10px;
+  color: #e2e8f0;
+  font-family: 'Consolas', 'Courier New', Courier, monospace;
+  font-size: 13px;
+}
+
+.architecture-visual-wrapper {
+  display: inline-block;
+  min-width: 100%;
+}
+
+.tree-node-dir {
+  font-weight: bold;
+  color: #f59e0b;
+  margin-bottom: 4px;
+  padding: 2px 6px;
+  background: rgba(245, 158, 11, 0.1);
+  border-radius: 4px;
+  display: inline-block;
+}
+
+.tree-node-file {
+  color: #38bdf8;
+  padding: 2px 6px;
+  background: rgba(56, 189, 248, 0.1);
+  border-radius: 4px;
+  display: inline-block;
+}
+
+.tree-branch {
+  list-style: none;
+  padding-left: 20px;
+  margin: 6px 0;
+  border-left: 1px dotted rgba(255, 255, 255, 0.2);
+}
+
+.tree-branch li {
+  margin-bottom: 6px;
+  position: relative;
+}
+
+.tree-branch li::before {
+  content: "";
+  position: absolute;
+  top: 10px;
+  left: -20px;
+  width: 15px;
+  height: 1px;
+  border-bottom: 1px dotted rgba(255, 255, 255, 0.2);
 }

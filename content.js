@@ -1,4 +1,4 @@
-// AI Project Extractor - Power Developer Suite Content Script
+// AI Project Extractor - Power Developer Suite Content Script (Visual Preview & Architecture Update)
 
 (function () {
   let detectedFiles = [];
@@ -132,7 +132,6 @@
     return cleaned;
   }
 
-  // Helper to convert wildcard patterns to Regex (e.g. *.log -> .*\.log$)
   function wildcardToRegex(pattern) {
     const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&');
     return new RegExp('^' + escaped.replace(/\*/g, '.*') + '$', 'i');
@@ -146,7 +145,6 @@
   }
 
   function getFilenameFromPrecedingSiblings(preElement) {
-    // Check custom regex first
     let fileRegex = customRegexRule || /(?:📁|\d+[\.\)]|\s)*([a-zA-Z0-9_\-\.\/]+\.[a-zA-Z0-9]+)/;
     
     let sibling = preElement.previousElementSibling;
@@ -156,7 +154,6 @@
       if (text.length < 150 && text.trim().length > 0) {
         const match = text.match(fileRegex);
         if (match) {
-          // If custom regex matches, capture group 1 holds the name, otherwise whole match
           const val = match[1] || match[0];
           if (val.includes('.') || customRegexRule) {
             return cleanFilename(val);
@@ -253,7 +250,6 @@
             filename = `file_${index + 1}.${ext}`;
           }
 
-          // Skip if ignore pattern matches
           if (shouldIgnoreFile(filename)) {
             console.log(`AI Extractor: Ignored file matching settings: ${filename}`);
             return;
@@ -463,8 +459,9 @@
       </div>
       
       <div class="sidebar-actions">
-        <button id="scan-btn" class="primary-btn">🔍 Scan Page</button>
-        <button id="export-zip-btn" class="accent-btn" disabled>📦 Export ZIP</button>
+        <button id="scan-btn" class="primary-btn">🔍 Scan</button>
+        <button id="export-zip-btn" class="accent-btn" disabled>📦 ZIP</button>
+        <button id="show-map-btn" class="accent-btn" disabled>🗺️ Map</button>
       </div>
 
       <div class="project-info">
@@ -472,7 +469,6 @@
         <input type="text" id="project-name-input" value="botsales" placeholder="project-name">
       </div>
 
-      <!-- Settings Section -->
       <div class="settings-section">
         <div class="section-title collapsible-header" id="settings-toggle">Settings & Filters (Click to Expand) ▾</div>
         <div id="settings-content" class="settings-content hidden">
@@ -523,7 +519,6 @@
         <div id="history-list" class="history-content hidden"></div>
       </div>
 
-      <!-- File tree search filter -->
       <div class="file-search-section">
         <input type="text" id="file-search-input" placeholder="🔍 Search file names or contents...">
       </div>
@@ -547,6 +542,7 @@
     document.getElementById('sidebar-close-btn').addEventListener('click', toggleSidebar);
     document.getElementById('scan-btn').addEventListener('click', scanForCodeBlocks);
     document.getElementById('export-zip-btn').addEventListener('click', exportAsZip);
+    document.getElementById('show-map-btn').addEventListener('click', showArchitectureMapModal);
     
     document.getElementById('link-folder-btn').addEventListener('click', linkLocalDirectory);
     document.getElementById('sync-disk-btn').addEventListener('click', syncToLocalDisk);
@@ -586,7 +582,7 @@
       document.getElementById('custom-regex-input').value = res.custom_regex;
     });
 
-    // Live File List Filter Search Box
+    // Live File List Filter
     document.getElementById('file-search-input').addEventListener('input', renderFileList);
 
     // Collapsible history section
@@ -617,11 +613,11 @@
     const exportBtn = document.getElementById('export-zip-btn');
     const syncBtn = document.getElementById('sync-disk-btn');
     const pushBtn = document.getElementById('git-push-btn');
+    const mapBtn = document.getElementById('show-map-btn');
     const searchVal = document.getElementById('file-search-input').value.toLowerCase().trim();
 
     listEl.innerHTML = '';
 
-    // Filter files
     const filteredFiles = detectedFiles.filter(file => {
       if (!searchVal) return true;
       return file.name.toLowerCase().includes(searchVal) || file.content.toLowerCase().includes(searchVal);
@@ -633,11 +629,13 @@
       exportBtn.disabled = true;
       syncBtn.disabled = true;
       pushBtn.disabled = true;
+      mapBtn.disabled = true;
       return;
     }
 
     noFilesEl.style.display = 'none';
     exportBtn.disabled = false;
+    mapBtn.disabled = false;
     if (localDirHandle) syncBtn.disabled = false;
     
     chrome.storage.local.get(['github_token', 'github_repo'], (res) => {
@@ -654,6 +652,8 @@
           <span class="file-icon">📄</span>
           <input type="text" class="file-name-edit" value="${file.name}" data-id="${file.id}">
           <div class="file-item-actions">
+            <!-- If HTML file, add instant sandbox run play icon -->
+            ${file.name.endsWith('.html') ? '<button class="run-file-btn" title="Run Live Sandbox Preview">▶️</button>' : ''}
             <button class="preview-btn" title="Edit / Diff Code">👁️</button>
             <button class="download-file-btn" title="Download File Alone">📥</button>
             <button class="delete-btn" title="Delete File">&times;</button>
@@ -666,6 +666,12 @@
         file.name = e.target.value.trim();
         saveProjectToHistory();
       });
+
+      if (file.name.endsWith('.html')) {
+        li.querySelector('.run-file-btn').addEventListener('click', () => {
+          showLiveSandboxModal(file);
+        });
+      }
 
       li.querySelector('.preview-btn').addEventListener('click', () => {
         showPreviewModal(file);
@@ -686,6 +692,135 @@
 
       listEl.appendChild(li);
     });
+  }
+
+  // -------------------------------------------------------------------
+  // LIVE SANDBOX WEB PREVIEW PREVIEWER
+  // -------------------------------------------------------------------
+
+  function showLiveSandboxModal(htmlFile) {
+    let modal = document.getElementById('ai-extractor-sandbox-modal');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'ai-extractor-sandbox-modal';
+      document.body.appendChild(modal);
+    }
+
+    modal.innerHTML = `
+      <div class="modal-content live-preview-modal">
+        <div class="modal-header">
+          <h4>Live Sandbox Run: ${htmlFile.name}</h4>
+          <button class="sandbox-modal-close">&times;</button>
+        </div>
+        <div class="modal-body preview-body">
+          <iframe id="sandbox-iframe" sandbox="allow-scripts allow-modals"></iframe>
+        </div>
+      </div>
+    `;
+
+    modal.style.display = 'flex';
+
+    modal.querySelector('.sandbox-modal-close').addEventListener('click', () => {
+      modal.style.display = 'none';
+    });
+
+    // Compile self-contained document by inlining CSS and JS
+    let compiledHTML = htmlFile.content;
+
+    detectedFiles.forEach(file => {
+      if (file.name.endsWith('.css')) {
+        const cleanName = file.name.split('/').pop();
+        // Replace stylesheet link tags with style elements
+        const linkPattern = new RegExp(`<link[^>]*href=["'][^"']*${cleanName}["'][^>]*>`, 'gi');
+        compiledHTML = compiledHTML.replace(linkPattern, `<style>${file.content}</style>`);
+      } else if (file.name.endsWith('.js')) {
+        const cleanName = file.name.split('/').pop();
+        // Replace script source links with script tags containing actual code
+        const scriptPattern = new RegExp(`<script[^>]*src=["'][^"']*${cleanName}["'][^>]*>\\s*</script>`, 'gi');
+        compiledHTML = compiledHTML.replace(scriptPattern, `<script>${file.content}</script>`);
+      }
+    });
+
+    const iframe = modal.querySelector('#sandbox-iframe');
+    iframe.srcdoc = compiledHTML;
+  }
+
+  // -------------------------------------------------------------------
+  // VISUAL PROJECT ARCHITECTURE DIAGRAM MAPPER
+  // -------------------------------------------------------------------
+
+  function showArchitectureMapModal() {
+    let modal = document.getElementById('ai-extractor-map-modal');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'ai-extractor-map-modal';
+      document.body.appendChild(modal);
+    }
+
+    modal.innerHTML = `
+      <div class="modal-content text-modal architecture-modal">
+        <div class="modal-header">
+          <h4>Project Architecture Tree</h4>
+          <button class="map-modal-close">&times;</button>
+        </div>
+        <div class="modal-body map-body">
+          <div class="architecture-tree-canvas" id="map-tree-canvas"></div>
+        </div>
+      </div>
+    `;
+
+    modal.style.display = 'flex';
+    modal.querySelector('.map-modal-close').addEventListener('click', () => {
+      modal.style.display = 'none';
+    });
+
+    // Generate Visual Tree Structure
+    const canvas = modal.querySelector('#map-tree-canvas');
+    canvas.innerHTML = generateVisualTreeHTML();
+  }
+
+  function generateVisualTreeHTML() {
+    const projectNameInput = document.getElementById('project-name-input');
+    const projectName = projectNameInput.value.trim() || 'root';
+
+    // Parse detectedFiles into a tree map
+    const tree = { name: projectName, type: 'directory', children: {} };
+
+    detectedFiles.forEach(file => {
+      const parts = file.name.split('/');
+      let current = tree;
+      
+      parts.forEach((part, index) => {
+        if (index === parts.length - 1) {
+          current.children[part] = { name: part, type: 'file' };
+        } else {
+          if (!current.children[part]) {
+            current.children[part] = { name: part, type: 'directory', children: {} };
+          }
+          current = current.children[part];
+        }
+      });
+    });
+
+    // Generate nested HTML branches
+    function renderNode(node) {
+      if (node.type === 'file') {
+        return `<div class="tree-node-file">📄 ${node.name}</div>`;
+      }
+      
+      let childrenHTML = '';
+      const keys = Object.keys(node.children);
+      keys.forEach(key => {
+        childrenHTML += `<li>${renderNode(node.children[key])}</li>`;
+      });
+
+      return `
+        <div class="tree-node-dir">📁 ${node.name}</div>
+        ${keys.length > 0 ? `<ul class="tree-branch">${childrenHTML}</ul>` : ''}
+      `;
+    }
+
+    return `<div class="architecture-visual-wrapper">${renderNode(tree)}</div>`;
   }
 
   // -------------------------------------------------------------------
@@ -712,7 +847,6 @@
   // CODE EDITOR & DIFF VISUALIZER & LINTER & SEARCH/REPLACE
   // -------------------------------------------------------------------
 
-  // Simple runtime syntax validation (Linter)
   function validateCodeSyntax(content, lang) {
     if (!content.trim()) return { ok: true };
     const format = lang.toLowerCase();
@@ -728,7 +862,7 @@
     
     if (format === 'javascript' || format === 'js') {
       try {
-        new Function(content); // Basic JS structural checks
+        new Function(content); 
         return { ok: true };
       } catch(e) {
         return { ok: false, message: `JS parsing warning: ${e.message}` };
@@ -787,7 +921,6 @@
         
         <div class="modal-body">
           <div id="editor-view" class="tab-panel">
-            <!-- Search & Replace Controls inside Editor -->
             <div class="editor-search-replace-row">
               <input type="text" id="editor-find-input" placeholder="Find text...">
               <input type="text" id="editor-replace-input" placeholder="Replace with...">
@@ -796,7 +929,6 @@
             
             <textarea class="code-preview-area" id="editor-textarea">${file.content}</textarea>
             
-            <!-- Real-time Linter warning logging log -->
             <div id="editor-linter-log" class="linter-log-banner hidden"></div>
           </div>
           <div id="diff-view" class="tab-panel hidden">
@@ -819,7 +951,6 @@
     const viewDiff = modal.querySelector('#diff-view');
     const diffContainer = modal.querySelector('#diff-container');
 
-    // Live Syntax Checking / Linter
     function runLinter() {
       const lint = validateCodeSyntax(textEditor.value, file.name.split('.').pop());
       if (lint.ok) {
@@ -831,15 +962,13 @@
       }
     }
     textEditor.addEventListener('input', runLinter);
-    runLinter(); // Run once initially
+    runLinter(); 
 
-    // Find & Replace actions
     modal.querySelector('#editor-replace-btn').addEventListener('click', () => {
       const findVal = modal.querySelector('#editor-find-input').value;
       const replaceVal = modal.querySelector('#editor-replace-input').value;
       if (!findVal) return;
       const content = textEditor.value;
-      // Global string replacement
       const newContent = content.split(findVal).join(replaceVal);
       textEditor.value = newContent;
       runLinter();
