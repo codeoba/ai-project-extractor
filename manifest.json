@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AI Project Extractor",
-  "version": "1.1",
+  "version": "1.2",
   "description": "Extracts, edits, diffs, syncs locally, and pushes code projects from AI chats to GitHub.",
   "permissions": [
     "downloads",
@@ -24,7 +24,17 @@
   ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "AI Project Extractor"
+    "default_title": "AI Project Extractor",
+    "default_icon": {
+      "16": "icon.png",
+      "48": "icon.png",
+      "128": "icon.png"
+    }
+  },
+  "icons": {
+    "16": "icon.png",
+    "48": "icon.png",
+    "128": "icon.png"
   },
   "background": {
     "service_worker": "background.js"
